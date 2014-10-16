@@ -180,11 +180,11 @@ stats.o: stats.c $(sam_h) sam_header.h samtools.h stats_isize.h $(HTSDIR)/htslib
 # areas within the test suite (or set it to ':' to use no reference areas).
 # (regression.sh sets $REF_PATH to a subdirectory itself.)
 check test: samtools $(BGZIP) $(BUILT_TEST_PROGRAMS)
-	REF_PATH=: test/test.pl --exec bgzip=$(BGZIP)
-	test/merge/test_bam_translate test/merge/test_bam_translate.tmp
-	test/merge/test_pretty_header
-	test/merge/test_rtrans_build
-	test/merge/test_trans_tbl_init
+	REF_PATH=: TEST_FRAMEWORK="$(TEST_FRAMEWORK)" test/test.pl --exec bgzip=$(BGZIP)
+	$(TEST_FRAMEWORK) test/merge/test_bam_translate test/merge/test_bam_translate.tmp
+	$(TEST_FRAMEWORK) test/merge/test_pretty_header
+	$(TEST_FRAMEWORK) test/merge/test_rtrans_build
+	$(TEST_FRAMEWORK) test/merge/test_trans_tbl_init
 	cd test/mpileup && ./regression.sh
 	test/split/test_count_rg
 	test/split/test_expand_format_string

@@ -98,6 +98,11 @@ sub parse_params
     {
         $SIG{TERM} = $SIG{INT} = sub { clean_files($opts); };
     }
+
+    if ($ENV{TEST_FRAMEWORK}) {
+	$$opts{framework} = "$ENV{TEST_FRAMEWORK} ";
+    }
+
     return $opts;
 }
 sub clean_files
@@ -106,6 +111,19 @@ sub clean_files
     print STDERR "Signal caught, cleaning and exiting...\n";
     `rm -rf $$opts{tmp}`;
 }
+
+# Quote strings so they survive passage through the shell intact.
+# @_ contains the list of aguments that we want to pass.
+# Returns the arguments quoted and joined with spaces.
+
+sub quotify {
+    return join(' ', map {
+        my $tmp = $_;
+        $tmp =~ s/'/'\\''/g;
+	"'$tmp'";
+		} @_);
+}
+
 sub _cmd
 {
     my ($cmd) = @_;
@@ -308,24 +326,24 @@ sub test_bgzip
         print $fh $out;
     }
     close($fh);
-    cmd("cat $$opts{tmp}/bgzip.dat | $$opts{bgzip} -ci -I$$opts{tmp}/bgzip.dat.gz.gzi > $$opts{tmp}/bgzip.dat.gz");
+    cmd("cat $$opts{tmp}/bgzip.dat | $$opts{framework}$$opts{bgzip} -ci -I$$opts{tmp}/bgzip.dat.gz.gzi > $$opts{tmp}/bgzip.dat.gz");
 
     # Run tests
     my ($test,$out);
 
-    $test = "$$opts{bgzip} -c -b 65272 -s 5 $$opts{tmp}/bgzip.dat.gz";
+    $test = "$$opts{framework}$$opts{bgzip} -c -b 65272 -s 5 $$opts{tmp}/bgzip.dat.gz";
     print "$test\n";
     $out = cmd($test);
     if ( $out ne '65272' ) { failed($opts,msg=>$test,reason=>"Expected \"65272\" got \"$out\"\n"); }
     else { passed($opts,msg=>$test); }
 
-    $test = "$$opts{bgzip} -c -b 979200 -s 6 $$opts{tmp}/bgzip.dat.gz";
+    $test = "$$opts{framework}$$opts{bgzip} -c -b 979200 -s 6 $$opts{tmp}/bgzip.dat.gz";
     print "$test\n";
     $out = cmd($test);
     if ( $out ne '979200' ) { failed($opts,msg=>$test,reason=>"Expected \"979200\" got \"$out\"\n"); }
     else { passed($opts,msg=>$test); }
 
-    $test = "$$opts{bgzip} -c -b 652804 -s 6 $$opts{tmp}/bgzip.dat.gz";
+    $test = "$$opts{framework}$$opts{bgzip} -c -b 652804 -s 6 $$opts{tmp}/bgzip.dat.gz";
     print "$test\n";
     $out = cmd($test);
     if ( $out ne '652804' ) { failed($opts,msg=>$test,reason=>"Expected \"652804\" got \"$out\"\n"); }
@@ -398,15 +416,15 @@ sub test_faidx
     close($fh);
 
     # Run tests: index and retrieval from plain text and compressed files
-    cmd("$$opts{bin}/samtools faidx $$opts{tmp}/faidx.fa");
-    cmd("cat $$opts{tmp}/faidx.fa | $$opts{bgzip} -ci -I $$opts{tmp}/faidx.fa.gz.gzi > $$opts{tmp}/faidx.fa.gz");
-    cmd("$$opts{bin}/samtools faidx $$opts{tmp}/faidx.fa.gz");
+    cmd("$$opts{framework}$$opts{bin}/samtools faidx $$opts{tmp}/faidx.fa");
+    cmd("cat $$opts{tmp}/faidx.fa | $$opts{framework}$$opts{bgzip} -ci -I $$opts{tmp}/faidx.fa.gz.gzi > $$opts{tmp}/faidx.fa.gz");
+    cmd("$$opts{framework}$$opts{bin}/samtools faidx $$opts{tmp}/faidx.fa.gz");
 
     for my $reg ('3:11-13','2:998-1003','1:100-104','1:99998-100007')
     {
         for my $file ("$$opts{tmp}/faidx.fa","$$opts{tmp}/faidx.fa.gz")
         {
-            my $test = "$$opts{bin}/samtools faidx $file $reg | grep -v '^>'";
+            my $test = "$$opts{framework}$$opts{bin}/samtools faidx $file $reg | grep -v '^>'";
             print "$test\n";
             my $seq = cmd($test);
             chomp($seq);
@@ -424,11 +442,11 @@ sub test_faidx
 sub test_index
 {
     my ($opts,%args) = @_;
-    cmd("$$opts{bin}/samtools view -b $$opts{path}/dat/large_chrom.sam > $$opts{tmp}/large_chrom.bam");
+    cmd("$$opts{framework}$$opts{bin}/samtools view -b $$opts{path}/dat/large_chrom.sam > $$opts{tmp}/large_chrom.bam");
     test_cmd($opts,out=>'dat/empty.expected',err=>'dat/large_chrom_bai_index.err',cmd=>"$$opts{bin}/samtools index $$opts{tmp}/large_chrom.bam",want_fail=>1,expect_fail=>1); # command should fail and give an error message, but isn't at the moment
-    cmd("$$opts{bin}/samtools index -c $$opts{tmp}/large_chrom.bam");
-    test_cmd($opts,out=>'dat/large_chrom.out',cmd=>"$$opts{bin}/samtools view $$opts{tmp}/large_chrom.bam ref2",expect_fail=>1); # failing: should be fixed
-    test_cmd($opts,out=>'dat/large_chrom.out',cmd=>"$$opts{bin}/samtools view $$opts{tmp}/large_chrom.bam ref2:1-541556283");
+    cmd("$$opts{framework}$$opts{bin}/samtools index -c $$opts{tmp}/large_chrom.bam");
+    test_cmd($opts,out=>'dat/large_chrom.out',cmd=>"$$opts{framework}$$opts{bin}/samtools view $$opts{tmp}/large_chrom.bam ref2",expect_fail=>1); # failing: should be fixed
+    test_cmd($opts,out=>'dat/large_chrom.out',cmd=>"$$opts{framework}$$opts{bin}/samtools view $$opts{tmp}/large_chrom.bam ref2:1-541556283");
 }
 
 sub test_mpileup
@@ -443,29 +461,29 @@ sub test_mpileup
     open(my $fh2,'>',"$$opts{tmp}/mpileup.cram.list") or error("$$opts{tmp}/mpileup.cram.list: $!");
     for my $file (@files)
     {
-        cmd("$$opts{bin}/samtools view -b $$opts{path}/dat/$file.sam > $$opts{tmp}/$file.bam");
-        cmd("$$opts{bin}/samtools view -C -T $$opts{path}/dat/mpileup.ref.fa $$opts{path}/dat/$file.sam > $$opts{tmp}/$file.cram");
-        cmd("$$opts{bin}/samtools index $$opts{tmp}/$file.bam");
-        cmd("$$opts{bin}/samtools index $$opts{tmp}/$file.cram");
+        cmd("$$opts{framework}$$opts{bin}/samtools view -b $$opts{path}/dat/$file.sam > $$opts{tmp}/$file.bam");
+        cmd("$$opts{framework}$$opts{bin}/samtools view -C -T $$opts{path}/dat/mpileup.ref.fa $$opts{path}/dat/$file.sam > $$opts{tmp}/$file.cram");
+        cmd("$$opts{framework}$$opts{bin}/samtools index $$opts{tmp}/$file.bam");
+        cmd("$$opts{framework}$$opts{bin}/samtools index $$opts{tmp}/$file.cram");
         print $fh1 "$$opts{tmp}/$file.bam\n";
         print $fh2 "$$opts{tmp}/$file.cram\n";
     }
     close($fh1);
     close($fh2);
     cmd("cp $$opts{path}/dat/$ref $$opts{tmp}/$ref");
-    cmd("$$opts{bgzip} -fi $$opts{tmp}/$ref");
-    cmd("$$opts{bin}/samtools faidx $$opts{tmp}/$ref.gz");
+    cmd("$$opts{framework}$$opts{bgzip} -fi $$opts{tmp}/$ref");
+    cmd("$$opts{framework}$$opts{bin}/samtools faidx $$opts{tmp}/$ref.gz");
 
     # print "$$opts{bin}samtools mpileup -gb $$opts{tmp}/mpileup.list -f $$opts{tmp}/$args{ref}.gz > $$opts{tmp}/mpileup.bcf\n";
-    test_cmd($opts,out=>'dat/mpileup.out.1',err=>'dat/mpileup.err.1',cmd=>"$$opts{bin}/samtools mpileup -b $$opts{tmp}/mpileup.bam.list -f $$opts{tmp}/mpileup.ref.fa.gz -r17:100-150");
-    test_cmd($opts,out=>'dat/mpileup.out.1',err=>'dat/mpileup.err.1',cmd=>"$$opts{bin}/samtools mpileup -b $$opts{tmp}/mpileup.cram.list -f $$opts{tmp}/mpileup.ref.fa.gz -r17:100-150");
-    test_cmd($opts,out=>'dat/mpileup.out.2',cmd=>"$$opts{bin}/samtools mpileup -uvDV -b $$opts{tmp}/mpileup.bam.list -f $$opts{tmp}/mpileup.ref.fa.gz -r17:100-600| grep -v ^##samtools | grep -v ^##ref");
-    test_cmd($opts,out=>'dat/mpileup.out.2',cmd=>"$$opts{bin}/samtools mpileup -uvDV -b $$opts{tmp}/mpileup.cram.list -f $$opts{tmp}/mpileup.ref.fa.gz -r17:100-600| grep -v ^##samtools | grep -v ^##ref");
-    test_cmd($opts,out=>'dat/mpileup.out.4',cmd=>"$$opts{bin}/samtools mpileup -uv -t DP,DPR,DV,DP4,INFO/DPR,SP -b $$opts{tmp}/mpileup.cram.list -f $$opts{tmp}/mpileup.ref.fa.gz -r17:100-600| grep -v ^##samtools | grep -v ^##ref");
-    test_cmd($opts,out=>'dat/mpileup.out.4',cmd=>"$$opts{bin}/samtools mpileup -uv -t DP,DPR,DV,DP4,INFO/DPR,SP -b $$opts{tmp}/mpileup.cram.list -f $$opts{tmp}/mpileup.ref.fa.gz -r17:100-600| grep -v ^##samtools | grep -v ^##ref");
+    test_cmd($opts,out=>'dat/mpileup.out.1',err=>'dat/mpileup.err.1',cmd=>"$$opts{framework}$$opts{bin}/samtools mpileup -b $$opts{tmp}/mpileup.bam.list -f $$opts{tmp}/mpileup.ref.fa.gz -r17:100-150");
+    test_cmd($opts,out=>'dat/mpileup.out.1',err=>'dat/mpileup.err.1',cmd=>"$$opts{framework}$$opts{bin}/samtools mpileup -b $$opts{tmp}/mpileup.cram.list -f $$opts{tmp}/mpileup.ref.fa.gz -r17:100-150");
+    test_cmd($opts,out=>'dat/mpileup.out.2',cmd=>"$$opts{framework}$$opts{bin}/samtools mpileup -uvDV -b $$opts{tmp}/mpileup.bam.list -f $$opts{tmp}/mpileup.ref.fa.gz -r17:100-600| grep -v ^##samtools | grep -v ^##ref");
+    test_cmd($opts,out=>'dat/mpileup.out.2',cmd=>"$$opts{framework}$$opts{bin}/samtools mpileup -uvDV -b $$opts{tmp}/mpileup.cram.list -f $$opts{tmp}/mpileup.ref.fa.gz -r17:100-600| grep -v ^##samtools | grep -v ^##ref");
+    test_cmd($opts,out=>'dat/mpileup.out.4',cmd=>"$$opts{framework}$$opts{bin}/samtools mpileup -uv -t DP,DPR,DV,DP4,INFO/DPR,SP -b $$opts{tmp}/mpileup.cram.list -f $$opts{tmp}/mpileup.ref.fa.gz -r17:100-600| grep -v ^##samtools | grep -v ^##ref");
+    test_cmd($opts,out=>'dat/mpileup.out.4',cmd=>"$$opts{framework}$$opts{bin}/samtools mpileup -uv -t DP,DPR,DV,DP4,INFO/DPR,SP -b $$opts{tmp}/mpileup.cram.list -f $$opts{tmp}/mpileup.ref.fa.gz -r17:100-600| grep -v ^##samtools | grep -v ^##ref");
     # test that filter mask replaces (not just adds to) default mask
-    test_cmd($opts,out=>'dat/mpileup.out.3',cmd=>"$$opts{bin}/samtools mpileup -B --ff 0x14 -f $$opts{tmp}/mpileup.ref.fa.gz -r17:1050-1060 $$opts{tmp}/mpileup.1.bam | grep -v mpileup");
-    test_cmd($opts,out=>'dat/mpileup.out.3',cmd=>"$$opts{bin}/samtools mpileup -B --ff 0x14 -f $$opts{tmp}/mpileup.ref.fa.gz -r17:1050-1060 $$opts{tmp}/mpileup.1.cram | grep -v mpileup");
+    test_cmd($opts,out=>'dat/mpileup.out.3',cmd=>"$$opts{framework}$$opts{bin}/samtools mpileup -B --ff 0x14 -f $$opts{tmp}/mpileup.ref.fa.gz -r17:1050-1060 $$opts{tmp}/mpileup.1.bam | grep -v mpileup");
+    test_cmd($opts,out=>'dat/mpileup.out.3',cmd=>"$$opts{framework}$$opts{bin}/samtools mpileup -B --ff 0x14 -f $$opts{tmp}/mpileup.ref.fa.gz -r17:1050-1060 $$opts{tmp}/mpileup.1.cram | grep -v mpileup");
 }
 
 sub test_usage
@@ -492,7 +510,7 @@ sub test_usage
 
     my $command = $args{cmd};
     my $commandpath = $$opts{bin}."/".$command;
-    my ($ret,$out,$err) = _cmd("$commandpath $args{redirection}");
+    my ($ret,$out,$err) = _cmd("$$opts{framework}$commandpath $args{redirection}");
     if ( $err =~ m/\/bin\/bash.*no.*such/i ) { failed($opts,msg=>$test,reason=>"could not run $commandpath: $out"); return; }
 
     my @sections = ($err =~ m/(^[A-Za-z]+.*?)(?:(?=^[A-Za-z]+:)|\z)/msg);
@@ -546,7 +564,7 @@ sub test_usage_subcommand
     my $command = $args{cmd};
     my $subcommand = $args{subcmd};
     my $commandpath = $$opts{bin}."/".$command;
-    my ($ret,$out,$err) = _cmd("$commandpath $subcommand $args{redirection}");
+    my ($ret,$out,$err) = _cmd("$$opts{framework}$commandpath $subcommand $args{redirection}");
 
     if ( $err =~ m/\/bin\/bash.*no.*such/i ) { failed($opts,msg=>$test,reason=>"could not run $commandpath $subcommand: $out"); return; }
 
@@ -837,21 +855,10 @@ sub run_view_test
     if ($args{out} && !$args{redirect}) { push(@cmd, '-o', $args{out}); }
     if ($args{args}) { push(@cmd, @{$args{args}}); }
 
-    my $pid = fork();
-    unless (defined($pid)) { die "Couldn't fork : $!\n"; }
-    unless ($pid) {
-        if ($args{stdin}) {
-            open(STDIN, '-|', 'cat', $args{stdin})
-                || die "Couldn't pipe cat $args{stdin} to STDIN : $!\n";
-        }
-        if ($args{redirect} && $args{out}) {
-            open(STDOUT, '>', $args{out})
-                || die "Couldn't redirect STDOUT to $args{out} : $!\n";
-        }
-        exec(@cmd) || die "Couldn't exec @cmd : $!\n";
-    }
-    my $reaped = waitpid($pid, 0);
-    my $res = $reaped == $pid && $? == 0 ? 0 : 1;
+    my $in = $args{stdin} ? quotify('cat', $args{stdin}) . ' | ' : '';
+    my $out = ($args{redirect} && $args{out}) ? ' > ' . quotify($args{out}) : '';
+    my $pipeline = $in . $$opts{framework} . quotify(@cmd) . $out;
+    my $res = system($pipeline) == 0 ? 0 : 1;
 
     if (!$res && $args{compare_sam} && $args{out}) {
         # Convert output back to sam and compare
@@ -862,15 +869,18 @@ sub run_view_test
         }
         push(@cmd2, $args{out});
 
-        push(@cmd, '&&', @cmd2); # For the 'Failed command' message below
+	my $pipeline2 = $$opts{framework} . quotify(@cmd2);
+
+        # For the 'Failed command' message below
+	$pipeline .= "&& $pipeline2";
 
         my $sam_out;
         if (!$args{pipe}) {
             $sam_out = $sam_name;
-            $res = system(@cmd2) == 0 ? 0 : 1;
+	    $res = system($pipeline2) == 0 ? 0 : 1;
         } else {
-            open($sam_out, '-|', @cmd2)
-                || die "Couldn't open pipe from @cmd2: $!\n";
+	    open($sam_out, "$pipeline2 |")
+		|| die "Couldn't open pipe from $pipeline2: $!\n";
         }
         # Hack $args so the comparison gets done
         $args{compare} = $args{compare_sam};
@@ -889,7 +899,7 @@ sub run_view_test
         }
     }
     if ($res) {
-        print "\tFailed command:\n\t@cmd\n\n";
+        print "\tFailed command:\n\t$pipeline\n\n";
         failed($opts, %args);
     } else {
         passed($opts, %args);
@@ -924,12 +934,14 @@ sub run_view_subsample_test
         my %reads;
         my @cmd = ("$$opts{bin}/samtools", 'view',
                    '-s', $try + $args{frac}, $args{input});
-        open(my $samp, '-|', @cmd) || die "Couldn't open pipe from @cmd: $!\n";
+	my $pipeline = $$opts{framework} . quotify(@cmd);
+	open(my $samp, "$pipeline |")
+	    || die "Couldn't open pipe from $pipeline : $!\n";
         while (<$samp>) {
             my ($name) = split(/\t/);
             $reads{$name}++;
         }
-        close($samp) || die "Error running @cmd\n";
+        close($samp) || die "Error running $pipeline\n";
         my $count = 0;
         while (my ($name, $num) = each %reads) {
             if ($num != 2) {
@@ -975,14 +987,9 @@ sub open_bgunzip
 {
     my ($opts, $in) = @_;
 
-    my @cmd = ("$$opts{bgzip}", '-c', '-d');
-    my $bgzip;
-    my $pid = open($bgzip, '-|');
-    unless (defined($pid)) { die "Couldn't fork: $!\n"; }
-    unless ($pid) {
-        open(STDIN, '<', $in) || die "Couldn't redirect STDIN: $!\n";
-        exec(@cmd) || die "Couldn't exec @cmd: $!\n";
-    }
+    my $cmd = ($$opts{framework} . quotify("$$opts{bgzip}", '-c', '-d')
+               . ' < ' . quotify($in));
+    open(my $bgzip, "$cmd |") || die "Couldn't open pipe from $cmd : $!\n";
     return $bgzip;
 }
 
@@ -1310,12 +1317,9 @@ sub gen_file
     close($fa) || die "Error writing to $fai : $!\n";
 
     my $sam = "$prefix.sam.gz";
-    my $pid = open(my $s, '|-');
-    unless (defined($pid)) { die "Couldn't fork : $!\n"; }
-    unless ($pid) {
-        open(STDOUT, '>', $sam) || die "Couldn't redirect STDOUT to $sam: $!\n";
-        exec("$$opts{bgzip}", '-c') || die "Couldn't exec bgzip : $!\n";
-    }
+    my $pipeline = ($$opts{framework} . quotify($$opts{bgzip}, '-c')
+                    . ' > ' . quotify($sam));
+    open(my $s, "| $pipeline") || die "Couldn't open pipe to $pipeline : $!\n";
     print $s "\@HD\tVN:1.4\tSO:coordinate\n";
     print $s "\@RG\tID:g1\tDS:Group 1\tLB:Lib1\tSM:Sample1\n";
     print $s "\@SQ\tSN:ref1\tLN:$size\tUR:$fasta\n";
@@ -1663,10 +1667,10 @@ sub test_view
     my @region_inputs = ([BAM  => [$bam_with_ur_out2, $bam_with_ur_out]],
                          [CRAM => [$cram_with_ur_out2, $cram_with_ur_out]]);
     # Add indicies
-    cmd("'$$opts{bin}/samtools' index '$bam_with_ur_out'");
-    cmd("'$$opts{bin}/samtools' index '$cram_with_ur_out'");
-    cmd("'$$opts{bin}/samtools' index '$bam_with_ur_out2'");
-    cmd("'$$opts{bin}/samtools' index '$cram_with_ur_out2'");
+    cmd("$$opts{framework}'$$opts{bin}/samtools' index '$bam_with_ur_out'");
+    cmd("$$opts{framework}'$$opts{bin}/samtools' index '$cram_with_ur_out'");
+    cmd("$$opts{framework}'$$opts{bin}/samtools' index '$bam_with_ur_out2'");
+    cmd("$$opts{framework}'$$opts{bin}/samtools' index '$cram_with_ur_out2'");
 
     my $bed1 = "$$opts{path}/dat/view.001.01.bed";
     my $bed2 = "$$opts{path}/dat/view.001.02.bed";
@@ -1955,7 +1959,10 @@ sub test_cat
 
         # Recompress with bgzip to alter the location of the bgzf boundaries.
         $bgbams[$i] = sprintf("%s.%d.bgzip.bam", $out, $i + 1);
-        cmd("'$$opts{bgzip}' -c -d < '$bams[$i]' | '$$opts{bgzip}' -c > '$bgbams[$i]'");
+	cmd($$opts{framework} . quotify($$opts{bgzip}, '-c', '-d')
+            . ' < ' . quotify($bams[$i])
+            . ' | ' . $$opts{framework} . quotify($$opts{bgzip}, '-c')
+            . ' > ' . quotify($bgbams[$i]));
     }
 
     # Make a concatenated SAM file to compare
@@ -2151,12 +2158,12 @@ sub test_stats
 {
     my ($opts,%args) = @_;
 
-    test_cmd($opts,out=>'stat/1.stats.expected',cmd=>"$$opts{bin}/samtools stats -r $$opts{path}/stat/test.fa $$opts{path}/stat/1_map_cigar.sam | tail -n+3");
-    test_cmd($opts,out=>'stat/2.stats.expected',cmd=>"$$opts{bin}/samtools stats -r $$opts{path}/stat/test.fa $$opts{path}/stat/2_equal_cigar_full_seq.sam | tail -n+3");
-    test_cmd($opts,out=>'stat/3.stats.expected',cmd=>"$$opts{bin}/samtools stats -r $$opts{path}/stat/test.fa $$opts{path}/stat/3_map_cigar_equal_seq.sam | tail -n+3");
-    test_cmd($opts,out=>'stat/4.stats.expected',cmd=>"$$opts{bin}/samtools stats -r $$opts{path}/stat/test.fa $$opts{path}/stat/4_X_cigar_full_seq.sam | tail -n+3");
-    test_cmd($opts,out=>'stat/5.stats.expected',cmd=>"$$opts{bin}/samtools stats -r $$opts{path}/stat/test.fa $$opts{path}/stat/5_insert_cigar.sam | tail -n+3");
-    test_cmd($opts,out=>'stat/6.stats.expected',cmd=>"$$opts{bin}/samtools stats -r $$opts{path}/stat/test.fa -i 0 $$opts{path}/stat/5_insert_cigar.sam | tail -n+3");
+    test_cmd($opts,out=>'stat/1.stats.expected',cmd=>"$$opts{framework}$$opts{bin}/samtools stats -r $$opts{path}/stat/test.fa $$opts{path}/stat/1_map_cigar.sam | tail -n+3");
+    test_cmd($opts,out=>'stat/2.stats.expected',cmd=>"$$opts{framework}$$opts{bin}/samtools stats -r $$opts{path}/stat/test.fa $$opts{path}/stat/2_equal_cigar_full_seq.sam | tail -n+3");
+    test_cmd($opts,out=>'stat/3.stats.expected',cmd=>"$$opts{framework}$$opts{bin}/samtools stats -r $$opts{path}/stat/test.fa $$opts{path}/stat/3_map_cigar_equal_seq.sam | tail -n+3");
+    test_cmd($opts,out=>'stat/4.stats.expected',cmd=>"$$opts{framework}$$opts{bin}/samtools stats -r $$opts{path}/stat/test.fa $$opts{path}/stat/4_X_cigar_full_seq.sam | tail -n+3");
+    test_cmd($opts,out=>'stat/5.stats.expected',cmd=>"$$opts{framework}$$opts{bin}/samtools stats -r $$opts{path}/stat/test.fa $$opts{path}/stat/5_insert_cigar.sam | tail -n+3");
+    test_cmd($opts,out=>'stat/6.stats.expected',cmd=>"$$opts{framework}$$opts{bin}/samtools stats -r $$opts{path}/stat/test.fa -i 0 $$opts{path}/stat/5_insert_cigar.sam | tail -n+3");
 }
 
 sub test_merge
@@ -2166,9 +2173,9 @@ sub test_merge
     # Note the use of -s 1 to fix the random seed in place
 
     # Merge 1 - Sadly iterator API doesn't work with SAM files, expected fail
-    test_cmd($opts,out=>'merge/1.merge.expected',cmd=>"$$opts{bin}/samtools merge -s 1 - $$opts{path}/dat/test_input_1_a.sam $$opts{path}/dat/test_input_1_b.sam $$opts{path}/dat/test_input_1_c.sam", expect_fail=>1);
+    test_cmd($opts,out=>'merge/1.merge.expected',cmd=>"$$opts{framework}$$opts{bin}/samtools merge -s 1 - $$opts{path}/dat/test_input_1_a.sam $$opts{path}/dat/test_input_1_b.sam $$opts{path}/dat/test_input_1_c.sam", expect_fail=>1);
     # Merge 2 - Standard 3 file BAM merge all files presented on the command line
-    test_cmd($opts,out=>'merge/2.merge.expected.bam',cmd=>"$$opts{bin}/samtools merge -s 1 - $$opts{path}/dat/test_input_1_a.bam $$opts{path}/dat/test_input_1_b.bam $$opts{path}/dat/test_input_1_c.bam");
+    test_cmd($opts,out=>'merge/2.merge.expected.bam',cmd=>"$$opts{framework}$$opts{bin}/samtools merge -s 1 - $$opts{path}/dat/test_input_1_a.bam $$opts{path}/dat/test_input_1_b.bam $$opts{path}/dat/test_input_1_c.bam");
     # Merge 3 - Standard 3 file BAM merge 2 files in fofn 1 on command line
     open(my $fofn, "$$opts{path}/merge/test_3.fofn");
     my ($tmpfile_fh, $tmpfile_filename) = tempfile(UNLINK => 1);
@@ -2177,24 +2184,24 @@ sub test_merge
         print $tmpfile_fh "$$opts{path}/$_";
     }
     close($tmpfile_fh);
-    test_cmd($opts,out=>'merge/3.merge.expected.bam', err=>'merge/3.merge.expected.err',cmd=>"$$opts{bin}/samtools merge -s 1 -b $tmpfile_filename - $$opts{path}/dat/test_input_1_a.bam");
+    test_cmd($opts,out=>'merge/3.merge.expected.bam', err=>'merge/3.merge.expected.err',cmd=>"$$opts{framework}$$opts{bin}/samtools merge -s 1 -b $tmpfile_filename - $$opts{path}/dat/test_input_1_a.bam");
 }
 
 sub test_fixmate
 {
     my ($opts,%args) = @_;
 
-    test_cmd($opts,out=>'fixmate/1_coord_sort.sam.expected', err=>'fixmate/1_coord_sort.sam.expected.err', cmd=>"$$opts{bin}/samtools fixmate -O sam $$opts{path}/fixmate/1_coord_sort.sam -", expect_fail=>1);
-    test_cmd($opts,out=>'fixmate/2_isize_overflow.sam.expected', cmd=>"$$opts{bin}/samtools fixmate -O sam $$opts{path}/fixmate/2_isize_overflow.sam -");
-    test_cmd($opts,out=>'fixmate/3_reverse_read_pp_lt.sam.expected', cmd=>"$$opts{bin}/samtools fixmate -O sam $$opts{path}/fixmate/3_reverse_read_pp_lt.sam -");
-    test_cmd($opts,out=>'fixmate/4_reverse_read_pp_equal.sam.expected', cmd=>"$$opts{bin}/samtools fixmate -O sam $$opts{path}/fixmate/4_reverse_read_pp_equal.sam -");
-    test_cmd($opts,out=>'fixmate/5_ct.sam.expected', cmd=>"$$opts{bin}/samtools fixmate -cO sam $$opts{path}/fixmate/5_ct.sam -");
-    test_cmd($opts,out=>'fixmate/6_ct_replace.sam.expected', cmd=>"$$opts{bin}/samtools fixmate -cO sam $$opts{path}/fixmate/6_ct_replace.sam -");
+    test_cmd($opts,out=>'fixmate/1_coord_sort.sam.expected', err=>'fixmate/1_coord_sort.sam.expected.err', cmd=>"$$opts{framework}$$opts{bin}/samtools fixmate -O sam $$opts{path}/fixmate/1_coord_sort.sam -", expect_fail=>1);
+    test_cmd($opts,out=>'fixmate/2_isize_overflow.sam.expected', cmd=>"$$opts{framework}$$opts{bin}/samtools fixmate -O sam $$opts{path}/fixmate/2_isize_overflow.sam -");
+    test_cmd($opts,out=>'fixmate/3_reverse_read_pp_lt.sam.expected', cmd=>"$$opts{framework}$$opts{bin}/samtools fixmate -O sam $$opts{path}/fixmate/3_reverse_read_pp_lt.sam -");
+    test_cmd($opts,out=>'fixmate/4_reverse_read_pp_equal.sam.expected', cmd=>"$$opts{framework}$$opts{bin}/samtools fixmate -O sam $$opts{path}/fixmate/4_reverse_read_pp_equal.sam -");
+    test_cmd($opts,out=>'fixmate/5_ct.sam.expected', cmd=>"$$opts{framework}$$opts{bin}/samtools fixmate -cO sam $$opts{path}/fixmate/5_ct.sam -");
+    test_cmd($opts,out=>'fixmate/6_ct_replace.sam.expected', cmd=>"$$opts{framework}$$opts{bin}/samtools fixmate -cO sam $$opts{path}/fixmate/6_ct_replace.sam -");
 }
 
 sub test_idxstat
 {
     my ($opts,%args) = @_;
 
-    test_cmd($opts,out=>'idxstats/test_input_1_a.bam.expected', err=>'idxstats/test_input_1_a.bam.expected.err', cmd=>"$$opts{bin}/samtools idxstats $$opts{path}/dat/test_input_1_a.bam", expect_fail=>0);
+    test_cmd($opts,out=>'idxstats/test_input_1_a.bam.expected', err=>'idxstats/test_input_1_a.bam.expected.err', cmd=>"$$opts{framework}$$opts{bin}/samtools idxstats $$opts{path}/dat/test_input_1_a.bam", expect_fail=>0);
 }
