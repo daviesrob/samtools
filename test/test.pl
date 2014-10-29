@@ -79,7 +79,7 @@ sub error
 }
 sub parse_params
 {
-    my $opts = { bgzip=>"bgzip", keep_files=>0, nok=>0, nfailed=>0, nxfail => 0, nxpass => 0 };
+    my $opts = { bgzip=>"bgzip", keep_files=>0, nok=>0, nfailed=>0, nxfail => 0, nxpass => 0, framework=>"" };
     my $help;
     Getopt::Long::Configure('bundling');
     my $ret = GetOptions (
@@ -443,7 +443,7 @@ sub test_index
 {
     my ($opts,%args) = @_;
     cmd("$$opts{framework}$$opts{bin}/samtools view -b $$opts{path}/dat/large_chrom.sam > $$opts{tmp}/large_chrom.bam");
-    test_cmd($opts,out=>'dat/empty.expected',err=>'dat/large_chrom_bai_index.err',cmd=>"$$opts{bin}/samtools index $$opts{tmp}/large_chrom.bam",want_fail=>1,expect_fail=>1); # command should fail and give an error message, but isn't at the moment
+    test_cmd($opts,out=>'dat/empty.expected',err=>'dat/large_chrom_bai_index.err',cmd=>"$$opts{framework}$$opts{bin}/samtools index $$opts{tmp}/large_chrom.bam",want_fail=>1,expect_fail=>1); # command should fail and give an error message, but isn't at the moment
     cmd("$$opts{framework}$$opts{bin}/samtools index -c $$opts{tmp}/large_chrom.bam");
     test_cmd($opts,out=>'dat/large_chrom.out',cmd=>"$$opts{framework}$$opts{bin}/samtools view $$opts{tmp}/large_chrom.bam ref2",expect_fail=>1); # failing: should be fixed
     test_cmd($opts,out=>'dat/large_chrom.out',cmd=>"$$opts{framework}$$opts{bin}/samtools view $$opts{tmp}/large_chrom.bam ref2:1-541556283");
@@ -872,7 +872,7 @@ sub run_view_test
 	my $pipeline2 = $$opts{framework} . quotify(@cmd2);
 
         # For the 'Failed command' message below
-	$pipeline .= "&& $pipeline2";
+	$pipeline .= " && $pipeline2";
 
         my $sam_out;
         if (!$args{pipe}) {
