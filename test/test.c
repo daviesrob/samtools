@@ -39,6 +39,15 @@ void xfreopen(const char *path, const char *mode, FILE *stream)
     }
 }
 
+FILE * xfopen(const char *path, const char *mode)
+{
+    if (fopen(path, mode) == NULL) {
+        fprintf(stderr, __FILE__": error opening %s: %s\n",
+                path, strerror(errno));
+        exit(2);
+    }
+}
+
 void dump_hdr(const bam_hdr_t* hdr)
 {
     printf("n_targets: %d\n", hdr->n_targets);

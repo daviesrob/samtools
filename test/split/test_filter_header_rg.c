@@ -152,7 +152,7 @@ int main(int argc, char**argv)
     if (verbose) printf("RUN test 2\n");
 
     // test
-    xfreopen(tempfname, "w", stderr); // Redirect stderr to pipe
+    stderr = xfopen(tempfname, "w"); // Redirect stderr to pipe
     bool result_2 = filter_header_rg(hdr2, id_to_keep_2);
     fclose(stderr);
 

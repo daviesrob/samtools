@@ -408,7 +408,7 @@ int main(int argc, char**argv)
     if (verbose) printf("RUN test 2\n");
 
     // test
-    xfreopen(tempfname, "w", stderr); // Redirect stderr to pipe
+    stderr = xfopen(tempfname, "w"); // Redirect stderr to pipe
     bam_translate(b, &tbl2);
     fclose(stderr);
 
@@ -445,7 +445,7 @@ int main(int argc, char**argv)
     if (verbose) printf("RUN test 3\n");
 
     // test
-    xfreopen(tempfname, "w", stderr); // Redirect stderr to pipe
+    stderr = xfopen(tempfname, "w"); // Redirect stderr to pipe
     bam_translate(b, &tbl3);
     fclose(stderr);
 
@@ -482,7 +482,7 @@ int main(int argc, char**argv)
     if (verbose) printf("RUN test 4\n");
 
     // test
-    xfreopen(tempfname, "w", stderr); // Redirect stderr to pipe
+    stderr = xfopen(tempfname, "w"); // Redirect stderr to pipe
     bam_translate(b, &tbl4);
     fclose(stderr);
 
@@ -517,7 +517,7 @@ int main(int argc, char**argv)
         printf("RUN test 5\n");
     }
     // test
-    xfreopen(tempfname, "w", stderr); // Redirect stderr to pipe
+    stderr = xfopen(tempfname, "w"); // Redirect stderr to pipe
     bam_translate(b, &tbl5);
     fclose(stderr);
 
@@ -554,7 +554,7 @@ int main(int argc, char**argv)
     if (verbose) printf("RUN test 6\n");
 
     // test
-    xfreopen(tempfname, "w", stderr); // Redirect stderr to pipe
+    stderr = xfopen(tempfname, "w"); // Redirect stderr to pipe
     bam_translate(b, &tbl6);
     fclose(stderr);
 

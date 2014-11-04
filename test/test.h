@@ -30,6 +30,8 @@ DEALINGS IN THE SOFTWARE.  */
 
 void xfreopen(const char *path, const char *mode, FILE *stream);
 
+FILE * xfopen(const char *path, const char *mode);
+
 void dump_hdr(const bam_hdr_t* hdr);
 
 #endif

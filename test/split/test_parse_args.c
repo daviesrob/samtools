@@ -162,8 +162,8 @@ int main(int argc, char**argv)
     if (verbose) fprintf(orig_stdout, "RUN test 2\n");
 
     // test
-    xfreopen(tempfname_stdout, "w", stdout); // Redirect stdout to pipe
-    xfreopen(tempfname_stderr, "w", stderr); // Redirect stderr to pipe
+    stdout = xfopen(tempfname_stdout, "w"); // Redirect stdout to pipe
+    stderr = xfopen(tempfname_stderr, "w"); // Redirect stderr to pipe
     parsed_opts_t* result_2 = parse_args(argc_2, argv_2);
     fclose(stdout);
     fclose(stderr);
