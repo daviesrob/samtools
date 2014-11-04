@@ -145,8 +145,8 @@ regtest() {
 
 echo "Samtools mpileup tests:"
 
-samtools="../../samtools"
-filter="../vcf-miniview -f"
+samtools=${TEST_FRAMEWORK:+"$TEST_FRAMEWORK "}"../../samtools"
+filter=${TEST_FRAMEWORK:+"$TEST_FRAMEWORK "}"../vcf-miniview -f"
 regtest mpileup.reg
 
 # samtools="./samtools-0.1.19"
