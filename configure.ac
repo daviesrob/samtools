@@ -133,5 +133,9 @@ case $host_alias in
     ;;
 esac
 
+dnl connect() etc. fns are in libc on linux, but libsocket on illumos/Solaris
+libsocket=unneeded
+AC_SEARCH_LIBS(connect, socket, [libsocket=needed], [])
+
 AC_CONFIG_FILES([config.mk])
 AC_OUTPUT
