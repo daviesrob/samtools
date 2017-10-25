@@ -29,15 +29,18 @@ DEALINGS IN THE SOFTWARE
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-#include <zlib.h>
 #include <unistd.h>
 #include <ctype.h>
+#include <time.h>
+#include <sys/stat.h>
 #include "htslib/thread_pool.h"
 #include "htslib/sam.h"
 #include "sam_opts.h"
 #include "samtools.h"
 #include "htslib/khash.h"
 #include "htslib/klist.h"
+#include "htslib/kstring.h"
+#include "tmp_file.h"
 
 typedef struct {
     int32_t single;
@@ -126,6 +129,7 @@ static int key_equal(key_data_t a, key_data_t b) {
 
 KHASH_INIT(reads, key_data_t, in_hash_t, 1, hash_key, key_equal) // read map hash
 KLIST_INIT(read_queue, read_queue_t, __free_queue_element) // the reads buffer
+KHASH_MAP_INIT_STR(duplicates, int) // map of duplicates for supplementary dup id 
 
 
 /* Calculate the mate's unclipped start based on position and cigar string from MC tag. */
@@ -438,24 +442,53 @@ static void make_single_key(key_data_t *key, bam1_t *bam) {
     key->orientation   = orientation;
 }
 
+/* Add the duplicate name to a hash if it does not exist. */
+
+static int add_duplicate(khash_t(duplicates) *d_hash, bam1_t *dupe) {
+    khiter_t d;
+    int ret;
+    
+    d = kh_get(duplicates, d_hash, bam_get_qname(dupe));
+    
+    if (d == kh_end(d_hash)) {
+        d = kh_put(duplicates, d_hash, strdup(bam_get_qname(dupe)), &ret);
+
+        if (ret > 0) {
+            kh_value(d_hash, d) = 1;
+        } else if (ret == 0) {
+            kh_value(d_hash, d)++;
+        } else {
+            fprintf(stderr, "[markdup] error: unable to store supplementary duplicates.\n");
+            return 1;
+        }
+    }
+    
+    return 0;
+}
+    
 
 /* Compare the reads near each other (coordinate sorted) and try to spot the duplicates.
    Generally the highest quality scoring is chosen as the original and all others the duplicates.
    The score is based on the sum of the quality values (<= 15) of the read and its mate (if any).
    While single reads are compared to only one read of a pair, the pair will chosen as the original.
-   The comparison is done on position and orientation, see above for details. */
+   The comparison is done on position and orientation, see above for details.
+   
+   Marking the supplementary reads of a duplicate as also duplicates takes an extra file read/write
+   step.  This is because the duplicate can occur before the primary read.*/
 
-static int bam_mark_duplicates(samFile *in, samFile *out, int remove_dups, int32_t max_length, int do_stats) {
+static int bam_mark_duplicates(samFile *in, samFile *out, char *prefix, int remove_dups, int32_t max_length, int do_stats, int supp, int tag) {
     bam_hdr_t *header;
     khiter_t k;
     khash_t(reads) *pair_hash        = kh_init(reads);
     khash_t(reads) *single_hash      = kh_init(reads);
     klist_t(read_queue) *read_buffer = kl_init(read_queue);
     kliter_t(read_queue) *rq;
+    khash_t(duplicates) *dup_hash    = kh_init(duplicates);
     int32_t prev_tid, prev_coord;
     read_queue_t *in_read;
     int ret;
     int reading, writing, excluded, duplicate, single, pair, single_dup, examined;
+    tmp_file_t temp;
 
     if ((header = sam_hdr_read(in)) == NULL) {
         fprintf(stderr, "[markdup] error reading header\n");
@@ -488,7 +521,14 @@ static int bam_mark_duplicates(samFile *in, samFile *out, int remove_dups, int32
 
     // get the buffer going
     in_read = kl_pushp(read_queue, read_buffer);
-
+    
+    // handling supplementary reads needs a temporary file
+    if (supp) {
+        if (tmp_file_open_write(&temp, prefix, 1)) {
+            fprintf(stderr, "[markdup] error: unable to open tmp file %s.\n", prefix);
+            return 1;
+        }
+    }
 
     if ((in_read->b = bam_init1()) == NULL) {
         fprintf(stderr, "[markdup] error: unable to allocate memory for alignment.\n");
@@ -519,6 +559,7 @@ static int bam_mark_duplicates(samFile *in, samFile *out, int remove_dups, int32
         if (!(in_read->b->core.flag & (BAM_FSECONDARY | BAM_FSUPPLEMENTARY | BAM_FUNMAP | BAM_FQCFAIL))) {
             examined++;
 
+        
             // look at the pairs first
             if ((in_read->b->core.flag & BAM_FPAIRED) && !(in_read->b->core.flag & BAM_FMUNMAP)) {
                 int ret, mate_tmp;
@@ -557,6 +598,18 @@ static int bam_mark_duplicates(samFile *in, samFile *out, int remove_dups, int32
                         bp->p = in_read->b;
                         dup->core.flag |= BAM_FDUP;
                         single_dup++;
+                        
+                        if (tag) {
+                            bam_aux_append(dup, "do", 'Z', strlen(bam_get_qname(bp->p)) + 1, (uint8_t*)bam_get_qname(bp->p));
+                        }
+                        
+                        if (supp) {
+                            if (bam_aux_get(dup, "SA") || (dup->core.flag & BAM_FMUNMAP)) {
+                                if (add_duplicate(dup_hash, dup)) {
+                                    return 1;
+                                }
+                            }
+                        }
                     }
                 } else {
                     fprintf(stderr, "[markdup] error: single hashing failure.\n");
@@ -610,7 +663,19 @@ static int bam_mark_duplicates(samFile *in, samFile *out, int remove_dups, int32
                     }
 
                     dup->core.flag |= BAM_FDUP;
-
+                    
+                    if (tag) {
+                        bam_aux_append(dup, "do", 'Z', strlen(bam_get_qname(bp->p)) + 1, (uint8_t*)bam_get_qname(bp->p));
+                    }
+                    
+                    if (supp) {
+                        if (bam_aux_get(dup, "SA") || (dup->core.flag & BAM_FMUNMAP)) {
+                            if (add_duplicate(dup_hash, dup)) {
+                                return 1;
+                            }
+                        }
+                    }
+                    
                     duplicate++;
                 } else {
                     fprintf(stderr, "[markdup] error: pair hashing failure.\n");
@@ -637,6 +702,19 @@ static int bam_mark_duplicates(samFile *in, samFile *out, int remove_dups, int32
 
                     if ((bp->p->core.flag & BAM_FPAIRED) && !(bp->p->core.flag & BAM_FMUNMAP)) {
                         // if matched against one of a pair just mark as duplicate
+                        
+                        if (tag) {
+                            bam_aux_append(in_read->b, "do", 'Z', strlen(bam_get_qname(bp->p)) + 1, (uint8_t*)bam_get_qname(bp->p));
+                        }
+
+                        if (supp) {
+                            if (bam_aux_get(in_read->b, "SA") || (in_read->b->core.flag & BAM_FMUNMAP)) {
+                                if (add_duplicate(dup_hash, in_read->b)) {
+                                    return 1;
+                                }
+                            }
+                        }
+                        
                         in_read->b->core.flag |= BAM_FDUP;
                     } else {
                         int64_t old_score, new_score;
@@ -655,6 +733,18 @@ static int bam_mark_duplicates(samFile *in, samFile *out, int remove_dups, int32
                         }
 
                         dup->core.flag |= BAM_FDUP;
+                        
+                        if (tag) {
+                            bam_aux_append(dup, "do", 'Z', strlen(bam_get_qname(bp->p)) + 1, (uint8_t*)bam_get_qname(bp->p));
+                        }
+
+                        if (supp) {
+                            if (bam_aux_get(dup, "SA") || (dup->core.flag & BAM_FMUNMAP)) {
+                                if (add_duplicate(dup_hash, dup)) {
+                                    return 1;
+                                }
+                            }
+                        }
                     }
 
                     single_dup++;
@@ -680,9 +770,16 @@ static int bam_mark_duplicates(samFile *in, samFile *out, int remove_dups, int32
             }
 
             if (!remove_dups || !(in_read->b->core.flag & BAM_FDUP)) {
-                if (sam_write1(out, header, in_read->b) < 0) {
-                    fprintf(stderr, "[markdup] error: writing output failed.\n");
-                    return 1;
+                if (supp) {
+                    if (tmp_file_write(&temp, in_read->b)) {
+                        fprintf(stderr, "[markdup] error: writing temp output failed.\n");
+                        return 1;
+                    }
+                } else {
+                    if (sam_write1(out, header, in_read->b) < 0) {
+                        fprintf(stderr, "[markdup] error: writing output failed.\n");
+                        return 1;
+                    }
                 }
 
                 writing++;
@@ -725,9 +822,16 @@ static int bam_mark_duplicates(samFile *in, samFile *out, int remove_dups, int32
 
         if (bam_get_qname(in_read->b)) { // last entry will be blank
             if (!remove_dups || !(in_read->b->core.flag & BAM_FDUP)) {
-                if (sam_write1(out, header, in_read->b) < 0) {
-                    fprintf(stderr, "[markdup] error: writing final output failed.\n");
-                    return 1;
+                if (supp) {
+                    if (tmp_file_write(&temp, in_read->b)) {
+                        fprintf(stderr, "[markdup] error: writing temp output failed.\n");
+                        return 1;
+                    }
+                } else {
+                    if (sam_write1(out, header, in_read->b) < 0) {
+                        fprintf(stderr, "[markdup] error: writing output failed.\n");
+                        return 1;
+                    }
                 }
 
                 writing++;
@@ -739,6 +843,56 @@ static int bam_mark_duplicates(samFile *in, samFile *out, int remove_dups, int32
         rq = kl_begin(read_buffer);
     }
 
+    if (supp) {
+        bam1_t *b;
+    
+        if (tmp_file_end_write(&temp)) {
+            fprintf(stderr, "[markdup] error: unable to end tmp writing.\n");
+            return 1;
+        }
+
+        // read data from temp file and mark duplicate supplementary alignments
+
+        if (tmp_file_begin_read(&temp, NULL)) {
+            return 1;
+        }
+
+        b = bam_init1();
+
+        while ((ret = tmp_file_read(&temp, b)) > 0) {
+
+            if ((b->core.flag & BAM_FSUPPLEMENTARY) || (b->core.flag & BAM_FUNMAP)) {
+                k = kh_get(duplicates, dup_hash, bam_get_qname(b));
+
+                if (k != kh_end(dup_hash)) {
+                    b->core.flag  |= BAM_FDUP;
+                }
+            }
+
+            if (!remove_dups || !(b->core.flag & BAM_FDUP)) {
+                if (sam_write1(out, header, b) < 0) {
+                    fprintf(stderr, "[markdup] error: writing final output failed.\n");
+                    return 1;
+                }
+            }
+        }
+
+        if (ret == -1) {
+            fprintf(stderr, "[markdup] error: failed to read tmp file.\n");
+            return 1;
+        }
+        
+        for (k = kh_begin(dup_hash); k != kh_end(dup_hash); ++k) {
+            if (kh_exist(dup_hash, k)) {
+                free((char *)kh_key(dup_hash, k));
+            }
+        }
+        
+        tmp_file_destroy(&temp, b, 1);
+        kh_destroy(duplicates, dup_hash);
+        bam_destroy1(b);
+    }
+    
     if (do_stats) {
         fprintf(stderr, "READ %d WRITTEN %d \n"
             "EXCLUDED %d EXAMINED %d\n"
@@ -747,12 +901,12 @@ static int bam_mark_duplicates(samFile *in, samFile *out, int remove_dups, int32
             "DUPLICATE TOTAL %d\n", reading, writing, excluded, examined, pair, single,
                                 duplicate, single_dup, single_dup + duplicate);
     }
-
+    
     kh_destroy(reads, pair_hash);
     kh_destroy(reads, single_hash);
     kl_destroy(read_queue, read_buffer);
     bam_hdr_destroy(header);
-
+    
     return 0;
 }
 
@@ -763,7 +917,10 @@ static int markdup_usage(void) {
     fprintf(stderr, "Option: \n");
     fprintf(stderr, "  -r           Remove duplicate reads\n");
     fprintf(stderr, "  -l           Max read length (default 300 bases)\n");
+    fprintf(stderr, "  -S           Mark supplemenary alignments of duplicates as duplicates (slower).\n");
     fprintf(stderr, "  -s           Report stats.\n");
+    fprintf(stderr, "  -t           Mark primary duplicates with the name of the original in a \'do\' tag."
+                                  " Mainly for information and debugging.\n");
 
     sam_global_opt_help(stderr, "-.O..@");
 
@@ -775,23 +932,29 @@ static int markdup_usage(void) {
 
 
 int bam_markdup(int argc, char **argv) {
-    int c, ret, remove_dups = 0, report_stats = 0;
+    int c, ret, remove_dups = 0, report_stats = 0, include_supplementary = 0, tag_dup = 0;
     int32_t max_length = 300;
     samFile *in = NULL, *out = NULL;
     char wmode[3] = {'w', 'b', 0};
     sam_global_args ga = SAM_GLOBAL_ARGS_INIT;
     htsThreadPool p = {NULL, 0};
-
+    kstring_t tmpprefix = {0, 0, NULL};
+    struct stat st;
+    unsigned int t;
+    
     static const struct option lopts[] = {
         SAM_OPT_GLOBAL_OPTIONS('-', 0, 'O', 0, 0, '@'),
         {NULL, 0, NULL, 0}
     };
 
-    while ((c = getopt_long(argc, argv, "rsl:O:@:", lopts, NULL)) >= 0) {
+    while ((c = getopt_long(argc, argv, "rsl:StT:O:@:", lopts, NULL)) >= 0) {
         switch (c) {
             case 'r': remove_dups = 1; break;
             case 'l': max_length = atoi(optarg); break;
             case 's': report_stats = 1; break;
+            case 'T': kputs(optarg, &tmpprefix); break;
+            case 'S': include_supplementary = 1; break;
+            case 't': tag_dup = 1; break;
             default: if (parse_sam_global_opt(c, optarg, lopts, &ga) == 0) break;
             /* else fall-through */
             case '?': return markdup_usage();
@@ -825,10 +988,27 @@ int bam_markdup(int argc, char **argv) {
         hts_set_opt(in,  HTS_OPT_THREAD_POOL, &p);
         hts_set_opt(out, HTS_OPT_THREAD_POOL, &p);
     }
-
+    
     // actual stuff happens here
-    ret = bam_mark_duplicates(in, out, remove_dups, max_length, report_stats);
+    
+    // we need temp files so fix up the name here
+    if (tmpprefix.l == 0) {
 
+        if (strcmp(argv[optind + 1], "-") != 0) 
+            ksprintf(&tmpprefix, "%s.", argv[optind + 1]);
+        else
+            kputc('.', &tmpprefix);
+    }
+
+    if (stat(tmpprefix.s, &st) == 0 && S_ISDIR(st.st_mode)) {
+        if (tmpprefix.s[tmpprefix.l-1] != '/') kputc('/', &tmpprefix);
+    }
+
+    t = ((unsigned) time(NULL)) ^ ((unsigned) clock());
+    ksprintf(&tmpprefix, "samtools.%d.%u.tmp", (int) getpid(), t % 10000);
+        
+    ret = bam_mark_duplicates(in, out, tmpprefix.s, remove_dups, max_length, report_stats, include_supplementary, tag_dup);
+            
     sam_close(in);
 
     if (sam_close(out) < 0) {
@@ -838,6 +1018,7 @@ int bam_markdup(int argc, char **argv) {
 
     if (p.pool) hts_tpool_destroy(p.pool);
 
+    free(tmpprefix.s);
     sam_global_args_free(&ga);
 
     return ret;

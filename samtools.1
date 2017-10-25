@@ -1845,6 +1845,7 @@ samtools markdup
 .IR length ]
 .RB [ -r ]
 .RB [ -s ]
+.RB [ -S ]
 .I in.algsort.bam out.bam
 .ad
 
@@ -1864,6 +1865,9 @@ Remove duplicate reads.
 .TP
 .B -s
 Print some basic stats.
+.TP
+.B -S
+Mark supplementary reads of duplicates as duplicates.
 .RE
 
 .EX 4
