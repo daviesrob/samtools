@@ -146,7 +146,7 @@ libbam.a:$(LOBJS)
 	$(AR) -csru $@ $(LOBJS)
 
 samtools: $(AOBJS) libbam.a libst.a $(HTSLIB) $(LZ4DIR)/liblz4.a
-	$(CC) $(ALL_LDFLAGS) -o $@ $(AOBJS) libbam.a libst.a $(HTSLIB_LIB) $(CURSES_LIB) -lm $(ALL_LIBS) -l:liblz4.a -lpthread
+	$(CC) $(ALL_LDFLAGS) -o $@ $(AOBJS) libbam.a libst.a $(HTSLIB_LIB) $(LZ4DIR)/liblz4.a $(CURSES_LIB) -lm $(ALL_LIBS) -lpthread
 
 # For building samtools and its test suite only: NOT to be installed.
 libst.a: $(LIBST_OBJS)
