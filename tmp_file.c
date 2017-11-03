@@ -2,7 +2,27 @@
     tmp_file.c - write to and read from a temporary binary file
     for fast storage plus added compression.
     
-    Andrew Whitwham, August 2017
+    Copyright (C) 2017 Genome Research Ltd.
+
+    Author: Andrew Whitwham <aw7@sanger.ac.uk>
+    
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE
 */
 
 #include <config.h>
@@ -19,7 +39,7 @@
 
 static void tmp_print_error(tmp_file_t *tmp, const char *fmt, ...) {
     va_list argp;
-    
+
     if (tmp->verbose) {
         va_start(argp, fmt);
         vfprintf(stderr, fmt, argp);
@@ -47,12 +67,12 @@ static int tmp_file_init(tmp_file_t *tmp, int verbose) {
     tmp->verbose = verbose;
     tmp->dict = NULL;
     tmp->groups_written = 0;
-    
+
     if (!tmp->ring_buffer || !tmp->comp_buffer || !tmp->stream) {
         tmp_print_error(tmp, "[tmp_file] Error: unable to allocate compression buffers.\n");
         return TMP_SAM_MEM_ERROR;
     }
-  
+
     return TMP_SAM_OK;
 }
 
@@ -73,7 +93,7 @@ int tmp_file_open_write(tmp_file_t *tmp, char *tmp_name, int verbose) {
         tmp_print_error(tmp, "[tmp_file] Error: unable to allocate memory for %s.\n", tmp_name);
         return TMP_SAM_MEM_ERROR;
     }
-    
+
     if ((tmp->fp = fopen(tmp->name, "w+b")) == NULL) {
         tmp_print_error(tmp, "[tmp_file] Error: unable to open write file %s.\n", tmp->name);
         return TMP_SAM_FILE_ERROR;
@@ -114,9 +134,9 @@ static int tmp_file_grow_ring_buffer(tmp_file_t *tmp, size_t new_size) {
         tmp_print_error(tmp, "[tmp_file] Error: unable to reallocate ring buffer.\n");
         return TMP_SAM_MEM_ERROR;
     }
-    
+
     tmp->ring_buffer_size = new_size;
-    
+
     return TMP_SAM_OK;
 }
 
@@ -192,7 +212,7 @@ int tmp_file_write(tmp_file_t *tmp, bam1_t *inbam) {
         int ret;
         
         if ((ret = tmp_file_grow_ring_buffer(tmp, (tmp->input_size + sizeof(bam1_t) + inbam->l_data) * 5))) {
-            tmp_print_error(tmp, "[tmp_file] Error: input line too big. (%ld).\n", 
+            tmp_print_error(tmp, "[tmp_file] Error: input line too big. (%ld).\n",
                 (tmp->input_size + inbam->l_data));
             
             return ret;
@@ -276,7 +296,7 @@ int tmp_file_open_read(tmp_file_t *tmp, bam1_t *inbam) {
         tmp_print_error(tmp, "[tmp_file] Error: unable to allocate compression stream.\n");
         return TMP_SAM_MEM_ERROR;
     }
-        
+
 
     return TMP_SAM_OK;
 }
@@ -352,7 +372,7 @@ int tmp_file_read(tmp_file_t *tmp, bam1_t *inbam) {
             return TMP_SAM_OK;
         }
         
-        if  (tmp->offset >= tmp->ring_buffer_size - tmp->max_data_size) 
+        if  (tmp->offset >= tmp->ring_buffer_size - tmp->max_data_size)
             tmp->offset = 0;
             
         tmp->ring_index = tmp->ring_buffer + tmp->offset;
@@ -390,7 +410,7 @@ int tmp_file_read(tmp_file_t *tmp, bam1_t *inbam) {
     entry_size = sizeof(bam1_t);
     
     memcpy(inbam->data, tmp->ring_index + entry_size, inbam->l_data);
-    entry_size += inbam->l_data;  
+    entry_size += inbam->l_data;
     
     tmp->offset += entry_size;
     tmp->read_size += entry_size;

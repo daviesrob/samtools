@@ -465,7 +465,7 @@ static int add_duplicate(khash_t(duplicates) *d_hash, bam1_t *dupe) {
     
     return 0;
 }
-    
+
 
 /* Compare the reads near each other (coordinate sorted) and try to spot the duplicates.
    Generally the highest quality scoring is chosen as the original and all others the duplicates.
@@ -916,9 +916,10 @@ static int markdup_usage(void) {
     fprintf(stderr, "Usage:  samtools markdup <input.bam> <output.bam>\n\n");
     fprintf(stderr, "Option: \n");
     fprintf(stderr, "  -r           Remove duplicate reads\n");
-    fprintf(stderr, "  -l           Max read length (default 300 bases)\n");
+    fprintf(stderr, "  -l INT       Max read length (default 300 bases)\n");
     fprintf(stderr, "  -S           Mark supplemenary alignments of duplicates as duplicates (slower).\n");
     fprintf(stderr, "  -s           Report stats.\n");
+    fprintf(stderr, "  -T PREFIX    Write temporary files to PREFIX.samtools.nnnn.nnnn.tmp.\n");
     fprintf(stderr, "  -t           Mark primary duplicates with the name of the original in a \'do\' tag."
                                   " Mainly for information and debugging.\n");
 

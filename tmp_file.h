@@ -2,7 +2,27 @@
     tmp_file.h - write to and read from a temporary binary file
     for fast storage plus added compression.
     
-    Andrew Whitwham, August 2017
+    Copyright (C) 2017 Genome Research Ltd.
+
+    Author: Andrew Whitwham <aw7@sanger.ac.uk>
+    
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE
 */
 
 #ifndef _TMP_SAM_FILE_H_
@@ -15,14 +35,19 @@
 extern "C" {
 #endif
 
+// Group size that seems to give reasonable compression.
 #define TMP_SAM_GROUP_SIZE 100
+
+// Arbitrary initial size values but growable.
 #define TMP_SAM_MAX_DATA 1024
 #define TMP_SAM_RING_SIZE 1048576
+
+// Error numbers.
 #define TMP_SAM_OK 0
 #define TMP_SAM_MEM_ERROR -1
 #define TMP_SAM_FILE_ERROR -2
 #define TMP_SAM_LZ4_ERROR -3
-#define TMP_SAM_INPUT_ERROR -4 
+#define TMP_SAM_INPUT_ERROR -4
 
 typedef struct {
     FILE *fp;
@@ -73,7 +98,7 @@ int tmp_file_write(tmp_file_t *tmp, bam1_t *inbam);
  */
 int tmp_file_close_write(tmp_file_t *tmp);
 
-    
+
 /*
  * Opens the file for reading.  Optionally, if given a pointer to an existing
  * bam1_t structure, it will free the data entry to prevent memory leaks.
@@ -89,7 +114,6 @@ int tmp_file_open_read(tmp_file_t *tmp, bam1_t *inbam);
  * Returns 0 on success, a negative number on failure.
  */
 int tmp_file_end_write(tmp_file_t *tmp);
-    
 
 /*
  * An alternative to tmp_file_open_read but works on an open file.
@@ -97,7 +121,6 @@ int tmp_file_end_write(tmp_file_t *tmp);
  * Returns 0 on success, a negative number on failure.
  */
 int tmp_file_begin_read(tmp_file_t *tmp, bam1_t *inbam);
-    
 
 /*
  * Read the next alignment, either from memory or from disk.
