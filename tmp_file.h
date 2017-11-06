@@ -1,11 +1,11 @@
 /*
     tmp_file.h - write to and read from a temporary binary file
     for fast storage plus added compression.
-    
+
     Copyright (C) 2017 Genome Research Ltd.
 
     Author: Andrew Whitwham <aw7@sanger.ac.uk>
-    
+
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
@@ -82,7 +82,7 @@ typedef struct {
 int tmp_file_open_write(tmp_file_t *tmp, char *tmp_name, int verbose);
 
 
-/* 
+/*
  * Stores an in memory bam structure for writing and if enough are gathered together writes
  * it to disk.  Mulitiple alignments compress better that single ones though after a certain number
  * there is a law of diminishing returns.
