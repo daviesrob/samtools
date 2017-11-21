@@ -134,7 +134,7 @@ print-version:
 lz4:$(LZ4DIR)/liblz4.a
 
 $(LZ4DIR)/liblz4.a:
-	$(MAKE) -C $(LZ4DIR)
+	$(MAKE) -C $(LZ4DIR) liblz4.a
 
 
 LIBST_OBJS = sam_opts.o sam_utils.o

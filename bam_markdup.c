@@ -600,7 +600,10 @@ static int bam_mark_duplicates(samFile *in, samFile *out, char *prefix, int remo
                         single_dup++;
 
                         if (tag) {
-                            bam_aux_append(dup, "do", 'Z', strlen(bam_get_qname(bp->p)) + 1, (uint8_t*)bam_get_qname(bp->p));
+                            if (bam_aux_append(dup, "do", 'Z', strlen(bam_get_qname(bp->p)) + 1, (uint8_t*)bam_get_qname(bp->p))) {
+                                fprintf(stderr, "[markdup] error: unable to append 'do' tag.\n");
+                                return 1;
+                            }
                         }
 
                         if (supp) {
@@ -665,7 +668,11 @@ static int bam_mark_duplicates(samFile *in, samFile *out, char *prefix, int remo
                     dup->core.flag |= BAM_FDUP;
 
                     if (tag) {
-                        bam_aux_append(dup, "do", 'Z', strlen(bam_get_qname(bp->p)) + 1, (uint8_t*)bam_get_qname(bp->p));
+                        if (bam_aux_append(dup, "do", 'Z', strlen(bam_get_qname(bp->p)) + 1, (uint8_t*)bam_get_qname(bp->p))) {
+                            fprintf(stderr, "[markdup] error: unable to append 'do' tag.\n");
+                            return 1;
+                        }
+                        
                     }
 
                     if (supp) {
@@ -704,7 +711,10 @@ static int bam_mark_duplicates(samFile *in, samFile *out, char *prefix, int remo
                         // if matched against one of a pair just mark as duplicate
 
                         if (tag) {
-                            bam_aux_append(in_read->b, "do", 'Z', strlen(bam_get_qname(bp->p)) + 1, (uint8_t*)bam_get_qname(bp->p));
+                            if (bam_aux_append(in_read->b, "do", 'Z', strlen(bam_get_qname(bp->p)) + 1, (uint8_t*)bam_get_qname(bp->p))) {
+                                fprintf(stderr, "[markdup] error: unable to append 'do' tag.\n");
+                                return 1;
+                            }
                         }
 
                         if (supp) {
@@ -735,7 +745,10 @@ static int bam_mark_duplicates(samFile *in, samFile *out, char *prefix, int remo
                         dup->core.flag |= BAM_FDUP;
 
                         if (tag) {
-                            bam_aux_append(dup, "do", 'Z', strlen(bam_get_qname(bp->p)) + 1, (uint8_t*)bam_get_qname(bp->p));
+                            if (bam_aux_append(dup, "do", 'Z', strlen(bam_get_qname(bp->p)) + 1, (uint8_t*)bam_get_qname(bp->p))) {
+                                fprintf(stderr, "[markdup] error: unable to append 'do' tag.\n");
+                                return 1;
+                            }
                         }
 
                         if (supp) {
@@ -888,7 +901,7 @@ static int bam_mark_duplicates(samFile *in, samFile *out, char *prefix, int remo
             }
         }
 
-        tmp_file_destroy(&temp, b, 1);
+        tmp_file_destroy(&temp, b, 0);
         kh_destroy(duplicates, dup_hash);
         bam_destroy1(b);
     }

@@ -32,6 +32,11 @@ DEALINGS IN THE SOFTWARE
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <fcntl.h>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif /* _WIN32 */
 
 #include "tmp_file.h"
 #include "htslib/sam.h"
@@ -84,20 +89,50 @@ static int tmp_file_init(tmp_file_t *tmp, int verbose) {
  */
 int tmp_file_open_write(tmp_file_t *tmp, char *tmp_name, int verbose) {
     int ret;
+    unsigned int count = 1;
+    const unsigned int max_count = 100000; // more tries than this then something else is wrong
+    int fd;
 
     if ((ret = tmp_file_init(tmp, verbose))) {
         return ret;
     }
-
-    if ((tmp->name = strdup(tmp_name)) == NULL) {
+    
+    // make space to write extended file name
+    if ((tmp->name = malloc(strlen(tmp_name) + 7)) == NULL) {
         tmp_print_error(tmp, "[tmp_file] Error: unable to allocate memory for %s.\n", tmp_name);
         return TMP_SAM_MEM_ERROR;
     }
-
-    if ((tmp->fp = fopen(tmp->name, "w+b")) == NULL) {
+    
+    // make sure temp file has a unique name
+    while (count < max_count) {
+        sprintf(tmp->name, "%s.%d", tmp_name, count);
+        
+        
+        #ifdef _WIN32
+        if ((fd = _open(tmp->name, O_RDWR|O_CREAT|O_EXCL|O_BINARY|O_TEMPORARY, 0600)) == -1) {
+        #else 
+        if ((fd = open(tmp->name, O_RDWR|O_CREAT|O_EXCL, 0600)) == -1) {
+        #endif /* _WIN32 */
+            count++;
+            continue;
+        }
+        
+        break;
+    }   
+    
+    if (count >= max_count) {
+        tmp_print_error(tmp, "[tmp_file] Error: unable to create unique temp file.\n");
+        return TMP_SAM_FILE_ERROR;
+    }
+    
+    if ((tmp->fp = fdopen(fd, "w+b")) == NULL) {
         tmp_print_error(tmp, "[tmp_file] Error: unable to open write file %s.\n", tmp->name);
         return TMP_SAM_FILE_ERROR;
     }
+    
+    #ifndef _WIN32
+    unlink(tmp->name); // should auto delete when closed on linux
+    #endif
 
     return TMP_SAM_OK;
 }
