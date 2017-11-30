@@ -33,6 +33,7 @@ DEALINGS IN THE SOFTWARE
 #include <stdlib.h>
 #include <stdarg.h>
 #include <fcntl.h>
+#include <errno.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -96,40 +97,46 @@ int tmp_file_open_write(tmp_file_t *tmp, char *tmp_name, int verbose) {
     if ((ret = tmp_file_init(tmp, verbose))) {
         return ret;
     }
-    
+
     // make space to write extended file name
     if ((tmp->name = malloc(strlen(tmp_name) + 7)) == NULL) {
         tmp_print_error(tmp, "[tmp_file] Error: unable to allocate memory for %s.\n", tmp_name);
         return TMP_SAM_MEM_ERROR;
     }
-    
+
     // make sure temp file has a unique name
     while (count < max_count) {
         sprintf(tmp->name, "%s.%d", tmp_name, count);
-        
-        
+
+
         #ifdef _WIN32
         if ((fd = _open(tmp->name, O_RDWR|O_CREAT|O_EXCL|O_BINARY|O_TEMPORARY, 0600)) == -1) {
-        #else 
+        #else
         if ((fd = open(tmp->name, O_RDWR|O_CREAT|O_EXCL, 0600)) == -1) {
         #endif /* _WIN32 */
+
+            if (errno != EEXIST) {
+                tmp_print_error(tmp, "[tmp_file] Error: unable to create tmp file %s.\n", tmp->name);
+                return TMP_SAM_FILE_ERROR;
+            }
+
             count++;
             continue;
         }
-        
+
         break;
-    }   
-    
+    }
+
     if (count >= max_count) {
         tmp_print_error(tmp, "[tmp_file] Error: unable to create unique temp file.\n");
         return TMP_SAM_FILE_ERROR;
     }
-    
+
     if ((tmp->fp = fdopen(fd, "w+b")) == NULL) {
         tmp_print_error(tmp, "[tmp_file] Error: unable to open write file %s.\n", tmp->name);
         return TMP_SAM_FILE_ERROR;
     }
-    
+
     #ifndef _WIN32
     unlink(tmp->name); // should auto delete when closed on linux
     #endif
