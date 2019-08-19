@@ -26,6 +26,7 @@ DEALINGS IN THE SOFTWARE.  */
 #define BAM_SAMPLE_H
 
 #include "htslib/kstring.h"
+#include "htslib/sam.h"
 
 typedef struct {
     int n, m;
@@ -34,7 +35,7 @@ typedef struct {
 } bam_sample_t;
 
 bam_sample_t *bam_smpl_init(void);
-int bam_smpl_add(bam_sample_t *sm, const char *abs, const char *txt);
+int bam_smpl_add(bam_sample_t *sm, const char *abs, sam_hdr_t *hdr);
 int bam_smpl_rg2smid(const bam_sample_t *sm, const char *fn, const char *rg, kstring_t *str);
 void bam_smpl_destroy(bam_sample_t *sm);
 
