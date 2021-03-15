@@ -498,7 +498,9 @@ static int accumulate_stats(astats_t *stats,
             kh_value(stats->qend, k) = start | (end << 32);
         }
     }
-    for (i = mstart; i < end; i++)
+
+    int64_t depth_end = end < stats->max_len ? end : stats->max_len;
+    for (i = mstart; i < depth_end; i++)
         stats->depth_all[i]++;
 
     // On single ended runs, eg ONT or PacBio, we just use the start/end
