@@ -72,6 +72,11 @@ samtools ampliconclip
 Clip reads in a SAM compatible file based on data from a BED file.  By default
 the reads are soft clipped and clip is only done from the 5' end.
 
+Note that this program currently only supports inputs aligned to a single
+reference.
+Trying to run it on files aligned to more than one reference is likely to
+lead to incorrect results.
+
 Some things to be aware of.  While ordering is not significant, adjustments to
 the left most mapping position (\fIPOS\fR) will mean that coordinate sorted
 files will need resorting.  In such cases the sorting order in the header is set

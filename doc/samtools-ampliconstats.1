@@ -68,6 +68,11 @@ MN908947.3  2181  2205  nCoV-2019_8_LEFT        60  +
 MN908947.3  2568  2592  nCoV-2019_8_RIGHT       60  -
 .EE
 
+Note that this program currently only supports inputs aligned to a single
+reference.
+Trying to run it on files aligned to more than one reference is likely to
+lead to incorrect results.
+
 Ampliconstats will identify which read belongs to which amplicon.  For
 purposes of computing coverage statistics for amplicons with multiple
 primer choices, only the innermost primer locations are used.
