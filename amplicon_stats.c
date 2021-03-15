@@ -1212,6 +1212,15 @@ static int amplicon_stats(astats_args_t *args, char **filev, int filec) {
             sname = (char *)get_sample_name(header, NULL);
 
         // FIXME: permit other references to be specified.
+        if (sam_hdr_nref(header) > 1) {
+            static int warned = 0;
+            if (!warned) {
+                print_error("ampliconstats",
+                            "Warning: This program only supports inputs aligned to a single reference.  Results may be incorrect.\n");
+                warned = 1;
+            }
+        }
+
         if ((args->max_len = get_ref_len(header, NULL)) < 0)
             goto err;
         if (initialise_amp_pos_lookup(args, amp, namp, args->max_len) < 0)

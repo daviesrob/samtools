@@ -592,6 +592,11 @@ static int bam_clip(samFile *in, samFile *out, samFile *reject, char *bedfile,
         goto fail;
     }
 
+    if (sam_hdr_nref(header) > 1) {
+        print_error("ampliconstats",
+                    "Warning: This program only supports inputs aligned to a single reference.  Results may be incorrect.\n");
+    }
+
     // changing pos can ruin coordinate sort order
     if (sam_hdr_find_tag_hd(header, "SO", &str) == 0 && str.s && strcmp(str.s, "coordinate") == 0) {
         const char *new_order = "unknown";
