@@ -405,7 +405,7 @@ int bcf_call_gap_prep(int n, int *n_plp, bam_pileup1_t **plp, hts_pos_t pos, bcf
                 // write the query sequence
                 for (l = qbeg; l < qend; ++l)
                     query[l - qbeg] = seq_nt16_int[bam_seqi(seq, l)];
-                { // do realignment; this is the bottleneck
+                if (qend > qbeg) { // do realignment; this is the bottleneck
                     const uint8_t *qual = bam_get_qual(p->b), *bq;
                     uint8_t *qq;
                     qq = calloc(qend - qbeg, 1);
