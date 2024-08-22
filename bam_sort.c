@@ -2274,7 +2274,6 @@ typedef struct {
     bam1_tag *buf;
     const sam_hdr_t *h;
     int error;
-    int large_pos;
     int minimiser_kmer;
     bool try_rev;
     bool no_squash;
@@ -3089,7 +3088,7 @@ static void *worker(void *data)
 
 static int sort_blocks(size_t k, bam1_tag *buf, const sam_hdr_t *h,
                        int n_threads, buf_region *in_mem,
-                       int large_pos, int minimiser_kmer, bool try_rev,
+                       int minimiser_kmer, bool try_rev,
                        bool no_squash)
 {
     int i;
@@ -3112,7 +3111,6 @@ static int sort_blocks(size_t k, bam1_tag *buf, const sam_hdr_t *h,
         w[i].buf_len = rest / (n_threads - i);
         w[i].buf = &buf[pos];
         w[i].h = h;
-        w[i].large_pos = large_pos;
         w[i].minimiser_kmer = minimiser_kmer;
         w[i].try_rev = try_rev;
         w[i].no_squash = no_squash;
@@ -3238,7 +3236,9 @@ int bam_sort_core_ext(SamOrder sam_order, char* sort_tag, int minimiser_kmer,
     khash_t(const_c2c) *lib_lookup = NULL;
     htsThreadPool htspool = { NULL, 0 };
     int num_in_mem = 0;
-    int large_pos = 0;
+    int bam_unsuitable_header = 0;
+    size_t header_len;
+    const char *header_reason = "";
 
     if (!b) {
         print_error("sort", "couldn't allocate memory for bam record");
@@ -3277,16 +3277,27 @@ int bam_sort_core_ext(SamOrder sam_order, char* sort_tag, int minimiser_kmer,
         goto err;
     }
 
-    // Inspect the header looking for long chromosomes
-    // If there is one, we need to write temporary files in SAM format
-    nref = sam_hdr_nref(header);
-    for (i = 0; i < nref; i++) {
-        if (sam_hdr_tid2len(header, i) > INT32_MAX)
-            large_pos = 1;
+    // Inspect the header.  If it's longer than 2^31 bytes or
+    // includes long chromosomes we need to write temporary files in SAM format
+    header_len = sam_hdr_length(header);
+    if (header_len >= (1ULL << 31)) {
+        bam_unsuitable_header = header_len < (1ULL << 32) ? 1 : 2;
+        header_reason = "large headers";
+    } else {
+        nref = sam_hdr_nref(header);
+        for (i = 0; i < nref && !bam_unsuitable_header; i++) {
+            if (sam_hdr_tid2len(header, i) > INT32_MAX) {
+                bam_unsuitable_header = 2;
+                header_reason = "large references";
+            }
+        }
     }
 
-    // Also check the output format is large position compatible
-    if (large_pos) {
+    // Also check the output format is big header / large position compatible
+    // We give a pass for headers between 2^31 and 2^32 bytes as we support
+    // them (but do print a warning).  These still spill as SAM so we don't
+    // print a warning every time we write a temporary file.
+    if (bam_unsuitable_header > 1) {
         int compatible = (out_fmt->format == sam
                           || (out_fmt->format == cram
                               && out_fmt->version.major >= 4)
@@ -3294,7 +3305,8 @@ int bam_sort_core_ext(SamOrder sam_order, char* sort_tag, int minimiser_kmer,
                               && modeout[0] == 'w'
                               && (modeout[1] == 'z' || modeout[1] == '\0')));
         if (!compatible) {
-            print_error("sort", "output format is not compatible with very large references");
+            print_error("sort", "output format is not compatible with very %s",
+                        header_reason);
             goto err;
         }
     }
@@ -3459,7 +3471,7 @@ int bam_sort_core_ext(SamOrder sam_order, char* sort_tag, int minimiser_kmer,
                 goto err;
 
             int sort_res = sort_blocks(k, buf, header, n_threads,
-                                       in_mem, large_pos, minimiser_kmer,
+                                       in_mem, minimiser_kmer,
                                        try_rev, no_squash);
             if (sort_res < 0)
                 goto err;
@@ -3485,8 +3497,8 @@ int bam_sort_core_ext(SamOrder sam_order, char* sort_tag, int minimiser_kmer,
                              fn_counter);
                 }
                 if (bam_merge_simple(g_sam_order, sort_by_tag, fns[n_files],
-                                     large_pos ? "wzx1" : "wbx1", header,
-                                     n_files - consolidate_from,
+                                     bam_unsuitable_header ? "wzx1" : "wbx1",
+                                     header, n_files - consolidate_from,
                                      &fns[consolidate_from], n_threads,
                                      in_mem, buf, keys,
                                      lib_lookup, &htspool, "sort", NULL, NULL,
@@ -3533,7 +3545,7 @@ int bam_sort_core_ext(SamOrder sam_order, char* sort_tag, int minimiser_kmer,
     // Sort last records
     if (k > 0) {
         num_in_mem = sort_blocks(k, buf, header, n_threads,
-                                 in_mem, large_pos, minimiser_kmer, try_rev,
+                                 in_mem, minimiser_kmer, try_rev,
                                  no_squash);
         if (num_in_mem < 0) goto err;
     } else {
