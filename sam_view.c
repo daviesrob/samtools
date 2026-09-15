@@ -1477,7 +1477,11 @@ int main_samview(int argc, char *argv[])
         goto view_end;
     }
     if (settings.rghash) {
-        sam_hdr_remove_lines(settings.header, "RG", "ID", settings.rghash);
+        if (sam_hdr_remove_lines(settings.header, "RG", "ID", settings.rghash) < 0) {
+            fprintf(stderr, "[main_samview] unable to remove RG tags from input.\n");
+            ret = 1;
+            goto view_end;
+        }
     }
 
     if (settings.remove_ur) {
