@@ -512,7 +512,12 @@ static int mplp_func(void *data, bam1_t *b)
         }
 
         skip = 0;
-        if (has_ref && (ma->conf->flag&MPLP_REALN)) sam_prob_realn(b, ref, ref_len, (ma->conf->flag & MPLP_REDO_BAQ)? 7 : 3);
+        if (has_ref && (ma->conf->flag&MPLP_REALN)) {
+            if (sam_prob_realn(b, ref, ref_len, (ma->conf->flag & MPLP_REDO_BAQ)? 7 : 3) < -3) {
+                fprintf(stderr,"[%s] BAQ alignment failed processing record at %d:%"PRIhts_pos"\n", __func__, b->core.tid, b->core.pos);
+                return -2;
+            }
+        }
         if (has_ref && ma->conf->capQ_thres > 10) {
             int q = sam_cap_mapq(b, ref, ref_len, ma->conf->capQ_thres);
             if (q < 0) skip = 1;
@@ -650,7 +655,12 @@ static int mpileup(mplp_conf_t *conf, int nfn, char **fn, char **fn_idx)
         bam_mplp_constructor(iter, pileup_cd_create);
         bam_mplp_destructor(iter, pileup_cd_destroy);
     }
-    if ( conf->flag & MPLP_SMART_OVERLAPS ) bam_mplp_init_overlaps(iter);
+    if ( conf->flag & MPLP_SMART_OVERLAPS ) {
+        if (bam_mplp_init_overlaps(iter) < 0) {
+            fprintf(stderr, "[%s] failed to initialise overlap detection\n", __func__);
+            exit(EXIT_FAILURE);
+        }
+    }
     if ( !conf->max_depth ) {
         max_depth = INT_MAX;
         fprintf(stderr, "[%s] Max depth set to maximum value (%d)\n", __func__, INT_MAX);
