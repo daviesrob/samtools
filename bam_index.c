@@ -230,9 +230,9 @@ static void usage_exit(FILE *fp, int exit_status)
 
 int bam_idxstats(int argc, char *argv[])
 {
-    hts_idx_t* idx;
-    sam_hdr_t* header;
-    samFile* fp;
+    hts_idx_t* idx = NULL;
+    sam_hdr_t* header = NULL;
+    samFile* fp = NULL;
     int c, has_index_file = 0, file_names = 1;
     char *index_name = NULL;
 
@@ -302,13 +302,23 @@ int bam_idxstats(int argc, char *argv[])
         // Dump information about unmapped reads
         printf("*\t0\t0\t%" PRIu64 "\n", hts_idx_get_n_no_coor(idx));
         hts_idx_destroy(idx);
+        idx = NULL;
+    }
+
+    if (ferror(stdout) != 0 || fflush(stdout) != 0) {
+        print_error("idxstats", "failed to write to stdout");
+        goto err;
     }
 
     sam_hdr_destroy(header);
-    sam_close(fp);
+    if (sam_close(fp) != 0) {
+        print_error("idxstats", "error closing \"%s\"", argv[optind]);
+        return 1;
+    }
     return 0;
 
  err:
+    hts_idx_destroy(idx);
     if (header)
         sam_hdr_destroy(header);
     sam_close(fp);
