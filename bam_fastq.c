@@ -547,34 +547,36 @@ static bool parse_opts(int argc, char *argv[], bam2fq_opts_t** opts_out)
     return true;
 }
 
-void set_sam_opts(samFile *fp, bam2fq_state_t *state,
-                  const bam2fq_opts_t *opts) {
+static int set_sam_opts(samFile *fp, bam2fq_state_t *state,
+                        const bam2fq_opts_t *opts) {
+    int err = 0;
     if (state->has12)
-        hts_set_opt(fp, FASTQ_OPT_RNUM, 1);
+        err |= hts_set_opt(fp, FASTQ_OPT_RNUM, 1) < 0;
 
     if (state->illumina_tag)
-        hts_set_opt(fp, FASTQ_OPT_CASAVA, 1);
+        err |= hts_set_opt(fp, FASTQ_OPT_CASAVA, 1) < 0;
 
-    hts_set_opt(fp, FASTQ_OPT_BARCODE, opts->barcode_tag);
+    err |= hts_set_opt(fp, FASTQ_OPT_BARCODE, opts->barcode_tag) < 0;
 
     if (state->UMI)
-        hts_set_opt(fp, FASTQ_OPT_UMI, state->UMI_tag);
+        err |= hts_set_opt(fp, FASTQ_OPT_UMI, state->UMI_tag) < 0;
 
     if (opts->extra_tags && (*opts->extra_tags == '*' || *opts->extra_tags == '\0'))
-        hts_set_opt(fp, FASTQ_OPT_AUX, NULL);
+        err |= hts_set_opt(fp, FASTQ_OPT_AUX, NULL) < 0;
     else {
-        kstring_t tag_list = {0,0};
+        kstring_t tag_list = KS_INITIALIZE;
         if (state->copy_tags)
-            kputs("RG,BC,QT", &tag_list);
+            err |= kputs("RG,BC,QT", &tag_list) < 0;
         if (opts->extra_tags) {
             if (tag_list.l)
-                kputc(',', &tag_list);
-            kputs(opts->extra_tags, &tag_list);
+                err |= kputc(',', &tag_list) < 0;
+            err |= kputs(opts->extra_tags, &tag_list) < 0;
         }
-        if (tag_list.l)
-            hts_set_opt(fp, FASTQ_OPT_AUX, tag_list.s);
+        if (!err && tag_list.l)
+            err |= hts_set_opt(fp, FASTQ_OPT_AUX, tag_list.s) < 0;
         ks_free(&tag_list);
     }
+    return err ? -1 : 0;
 }
 
 // Open a file as normal or gzipped based on filename.
@@ -673,7 +675,11 @@ static bool init_state(const bam2fq_opts_t* opts, bam2fq_state_t** state_out)
             free(state);
             return false;
         }
-        set_sam_opts(state->fpse, state, opts);
+        if (set_sam_opts(state->fpse, state, opts) < 0) {
+            print_error_errno("bam2fq", "Cannot set options for singleton file \"%s\"", opts->fnse);
+            free(state);
+            return false;
+        }
     }
 
     if (opts->ga.reference) {
@@ -698,7 +704,13 @@ static bool init_state(const bam2fq_opts_t* opts, bam2fq_state_t** state_out)
                     free(state);
                     return false;
                 }
-                set_sam_opts(state->fpr[i], state, opts);
+                if (set_sam_opts(state->fpr[i], state, opts) < 0) {
+                    print_error_errno("bam2fq",
+                                      "Cannot set options for r%d file \"%s\"",
+                                      i, opts->fnr[i]);
+                    free(state);
+                    return false;
+                }
             } else {
                 state->fpr[i] = state->fpr[j];
             }
@@ -709,7 +721,11 @@ static bool init_state(const bam2fq_opts_t* opts, bam2fq_state_t** state_out)
                     free(state);
                     return false;
                 }
-                set_sam_opts(state->hstdout, state, opts);
+                if (set_sam_opts(state->hstdout, state, opts) < 0) {
+                    print_error_errno("bam2fq", "Cannot set options for stdout");
+                    free(state);
+                    return false;
+                }
                 autoflush_if_stdout(state->hstdout, "-");
             }
             state->fpr[i] = state->hstdout;
@@ -734,7 +750,13 @@ static bool init_state(const bam2fq_opts_t* opts, bam2fq_state_t** state_out)
                     free(state);
                     return false;
                 }
-                set_sam_opts(state->fpi[i], state, opts);
+                if (set_sam_opts(state->fpi[i], state, opts) < 0) {
+                    print_error_errno("bam2fq",
+                                      "Cannot set options for i%d file \"%s\"",
+                                      i+1, opts->index_file[i]);
+                    free(state);
+                    return false;
+                }
             } else if (j < 0) {
                 state->fpi[i] = state->fpr[j+3];
             } else {
@@ -1121,7 +1143,7 @@ static int removesoftclips(const char *prg, bam1_t *b, kstring_t *clipbuf, const
         //ensure space for bases, quals, ':' and NUL
         if ((ret |= ks_resize(clipbuf, clipbuf->l + b->core.l_qseq * 2 + 2)) < 0) {
             perror("[bam2fq] Failed to store removed data");
-            return false;
+            return -1;
         }
         //to store bases n quals for auxdata
         auxb = (uint8_t*)clipbuf->s + clipbuf->l +
@@ -1229,7 +1251,10 @@ static int removesoftclips(const char *prg, bam1_t *b, kstring_t *clipbuf, const
             memmove(clipbuf->s + clipbuf->l, auxb - auxlen + 1, 2 * auxlen + 2);
         }
         clipbuf->l += auxlen * 2 + 2;
-        bam_aux_append(b, tag, 'Z', clipbuf->l, (uint8_t*)clipbuf->s);
+        if (bam_aux_append(b, tag, 'Z', clipbuf->l, (uint8_t*)clipbuf->s) < 0) {
+            print_error_errno(prg, "Couldn't append %c%c:Z aux tag", tag[0], tag[1]);
+            return -1;
+        }
     }
 
     return 0;
