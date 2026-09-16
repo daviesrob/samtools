@@ -189,7 +189,7 @@ int cram_reheader_inplace2(cram_fd *fd, sam_hdr_t *h, const char *arg_list,
     cram_block *b = NULL;
     sam_hdr_t *cram_h = NULL;
     off_t start;
-    int ret = -1;
+    int ret = -1, nomem = 0;
     if (!h)
         goto err;
 
@@ -233,8 +233,12 @@ int cram_reheader_inplace2(cram_fd *fd, sam_hdr_t *h, const char *arg_list,
     }
 
     cram_block_set_offset(b, 0);   // rewind block
-    int32_put_blk(b, header_len);
-    cram_block_append(b, (void *)sam_hdr_str(cram_h), header_len);
+    nomem |= int32_put_blk(b, header_len) < 0;
+    nomem |= cram_block_append(b, (void *)sam_hdr_str(cram_h), header_len) < 0;
+
+    if (nomem)
+        goto err;
+
     // Zero the remaining block
     memset((char *)cram_block_get_data(b)+cram_block_get_offset(b), 0,
            cram_block_get_uncomp_size(b) - cram_block_get_offset(b));
@@ -370,11 +374,15 @@ int cram_reheader_inplace3(cram_fd *fd, sam_hdr_t *h, const char *arg_list,
 
     // Version 3.0 supports compressed header
     b = cram_new_block(FILE_HEADER, 0);
-    int32_put_blk(b, header_len);
-    cram_block_append(b, (void *)sam_hdr_str(cram_h), header_len);
+    int nomem = int32_put_blk(b, header_len) < 0;
+    nomem |= cram_block_append(b, (void *)sam_hdr_str(cram_h), header_len) < 0;
+    if (nomem)
+        goto err;
+
     cram_block_update_size(b);
 
-    cram_compress_block(fd, b, NULL, -1, 9);
+    if (cram_compress_block(fd, b, NULL, -1, 9) < 0)
+        goto err;
 
     if (hseek(cram_fd_get_fp(fd), 26, SEEK_SET) != 26)
         goto err;
