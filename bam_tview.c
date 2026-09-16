@@ -194,7 +194,10 @@ int tv_pl_func(uint32_t tid, hts_pos_t pos, int n, const bam_pileup1_t *pl, void
         memset(&bcr, 0, sizeof bcr);
         int qsum[4], a1, a2, tmp;
         double p[3], prior = 30;
-        bcf_call_glfgen(n, pl, seq_nt16_table[(uint8_t) rb], tv->bca, &bcr);
+        if (bcf_call_glfgen(n, pl, seq_nt16_table[(uint8_t) rb], tv->bca, &bcr) < 0) {
+            print_error("tview", "Memory allocation failure.");
+            exit(1);
+        }
         for (i = 0; i < 4; ++i) qsum[i] = ((int)bcr.qsum[i])<<2 | i;
         for (i = 1; i < 4; ++i) // insertion sort
             for (j = i; j > 0 && qsum[j] > qsum[j-1]; --j)

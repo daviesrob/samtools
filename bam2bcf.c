@@ -75,11 +75,8 @@ int bcf_call_glfgen(int _n, const bam_pileup1_t *pl, int ref_base, bcf_callaux_t
     } else is_indel = 1;
     if (_n <= 0) return -1;
     // enlarge the bases array if necessary
-    if (bca->max_bases < _n) {
-        bca->max_bases = _n;
-        kroundup32(bca->max_bases);
-        bca->bases = (uint16_t*)realloc(bca->bases, 2 * (size_t) bca->max_bases);
-    }
+    if (hts_resize(uint16_t, _n, &bca->max_bases, &bca->bases, 0) < 0)
+        return -1;
     // fill the bases array
     for (i = n = 0; i < _n; ++i) {
         const bam_pileup1_t *p = pl + i;
@@ -118,6 +115,8 @@ int bcf_call_glfgen(int _n, const bam_pileup1_t *pl, int ref_base, bcf_callaux_t
         if (min_dist > CAP_DIST) min_dist = CAP_DIST;
     }
     // glfgen
-    errmod_cal(bca->e, n, 5, bca->bases, r->p); // calculate PL of each genotype
+    // calculate PL of each genotype
+    if (errmod_cal(bca->e, n, 5, bca->bases, r->p) < 0)
+        return -1;
     return n;
 }
