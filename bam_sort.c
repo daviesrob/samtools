@@ -406,7 +406,7 @@ static int gen_unique_id(char *prefix, khash_t(cset) *existing_ids,
 
     do {
         dest->l = 0;
-        ksprintf(dest, "%s-%08lX", prefix, lrand48());
+        if (ksprintf(dest, "%s-%08lX", prefix, lrand48()) < 0) return -1;
         iter = kh_get(cset, existing_ids, ks_str(dest));
     } while (iter != kh_end(existing_ids));
 
@@ -1007,7 +1007,8 @@ static int bam_translate(bam1_t* b, trans_tbl_t* tbl)
         khiter_t k = decoded_rg ? kh_get(c2c, tbl->rg_trans, decoded_rg) : kh_end(tbl->rg_trans);
         if (k != kh_end(tbl->rg_trans)) {
             char* translate_rg = kh_value(tbl->rg_trans,k);
-            bam_aux_del(b, rg);
+            if (bam_aux_del(b, rg) < 0)
+                goto fail;
             if (translate_rg) {
                 if (bam_aux_append(b, "RG", 'Z', strlen(translate_rg) + 1,
                                    (uint8_t*)translate_rg) < 0)
@@ -1017,7 +1018,8 @@ static int bam_translate(bam1_t* b, trans_tbl_t* tbl)
             if (warn_missing_tag("RG", decoded_rg,
                                  bam_get_qname(b), tbl->rg_trans) < 0)
                 goto fail;
-            bam_aux_del(b, rg);
+            if (bam_aux_del(b, rg) < 0)
+                goto fail;
         }
     }
 
@@ -1028,7 +1030,8 @@ static int bam_translate(bam1_t* b, trans_tbl_t* tbl)
         khiter_t k = decoded_pg ? kh_get(c2c, tbl->pg_trans, decoded_pg) : kh_end(tbl->pg_trans);
         if (k != kh_end(tbl->pg_trans)) {
             char* translate_pg = kh_value(tbl->pg_trans,k);
-            bam_aux_del(b, pg);
+            if (bam_aux_del(b, pg) < 0)
+                goto fail;
             if (translate_pg) {
                 if (bam_aux_append(b, "PG", 'Z', strlen(translate_pg) + 1,
                                    (uint8_t*)translate_pg) < 0)
@@ -1038,7 +1041,8 @@ static int bam_translate(bam1_t* b, trans_tbl_t* tbl)
             if (warn_missing_tag("PG", decoded_pg,
                                  bam_get_qname(b), tbl->pg_trans) < 0)
                 goto fail;
-            bam_aux_del(b, pg);
+            if (bam_aux_del(b, pg) < 0)
+                goto fail;
         }
     }
     return 0;
@@ -1493,9 +1497,14 @@ int bam_merge_core2(SamOrder sam_order, char* sort_tag, const char *out, const c
     while (heap->pos != HEAP_EMPTY) {
         bam1_t *b = heap->entry.bam_record;
         if (flag & MERGE_RG) {
+            int e = 0;
             uint8_t *rg = bam_aux_get(b, "RG");
-            if (rg) bam_aux_del(b, rg);
-            bam_aux_append(b, "RG", 'Z', RG_len[heap->i] + 1, (uint8_t*)RG[heap->i]);
+            if (rg) e |= bam_aux_del(b, rg) < 0;
+            e |= bam_aux_append(b, "RG", 'Z', RG_len[heap->i] + 1, (uint8_t*)RG[heap->i]) < 0;
+            if (e) {
+                print_error_errno(cmd, "couldn't update RG tag");
+                goto fail;
+            }
         }
         if (sam_write1(fpout, hout, b) < 0) {
             print_error_errno(cmd, "failed writing to \"%s\"", out);
@@ -3171,7 +3180,10 @@ static void *worker(void *data)
             worker_minhash(w);
             // fall-through
         default:
-            ks_mergesort(sort, w->buf_len, w->buf, 0);
+            if (ks_mergesort(sort, w->buf_len, w->buf, 0) < 0) {
+                w->error = errno;
+                return NULL;
+            }
     }
 
     return 0;
@@ -3802,7 +3814,7 @@ int bam_sort(int argc, char *argv[])
     sam_global_args ga = SAM_GLOBAL_ARGS_INIT;
     int window = 100;
     char *minimiser_ref = NULL;
-    int no_squash = 1;
+    int no_squash = 1, nomem = 0;
 
     static const struct option lopts[] = {
         SAM_OPT_GLOBAL_OPTIONS('-', 0, 'O', 0, 0, '@'),
@@ -3826,7 +3838,14 @@ int bam_sort(int argc, char *argv[])
                 else if (*q == 'g' || *q == 'G') max_mem <<= 30;
                 break;
             }
-        case 'T': kputs(optarg, &tmpprefix); break;
+        case 'T': {
+            if (kputs(optarg, &tmpprefix) < 0) {
+                perror("Couldn't copy sort prefix");
+                ret = EXIT_FAILURE;
+                goto sort_end;
+            }
+            break;
+        }
         case 'l':
             if (!parse_int_value(optarg, &level)) {
                 fprintf(stderr, "Invalid compression level\n");
@@ -3923,16 +3942,22 @@ int bam_sort(int argc, char *argv[])
     if (tmpprefix.l == 0) {
         if (strcmp(fnout, "-") != 0) {
             char *idx = strstr(fnout, HTS_IDX_DELIM);
-            kputsn(fnout, idx ? idx - fnout : strlen(fnout), &tmpprefix);
-            kputs(".tmp", &tmpprefix);
+            kputsn_chk(&nomem, fnout, idx ? idx - fnout : strlen(fnout), &tmpprefix);
+            kputs_chk(&nomem, ".tmp", &tmpprefix);
         } else {
-            kputc('.', &tmpprefix);
+            kputc_chk(&nomem, '.', &tmpprefix);
         }
     }
-    if (stat(tmpprefix.s, &st) == 0 && S_ISDIR(st.st_mode)) {
+    if (!nomem && stat(tmpprefix.s, &st) == 0 && S_ISDIR(st.st_mode)) {
         unsigned t = ((unsigned) time(NULL)) ^ ((unsigned) clock());
-        if (tmpprefix.s[tmpprefix.l-1] != '/') kputc('/', &tmpprefix);
-        ksprintf(&tmpprefix, "samtools.%d.%u.tmp", (int) getpid(), t % 10000);
+        if (tmpprefix.s[tmpprefix.l-1] != '/')
+            kputc_chk(&nomem, '/', &tmpprefix);
+        ksprintf_chk(&nomem, &tmpprefix, "samtools.%d.%u.tmp", (int) getpid(), t % 10000);
+    }
+    if (nomem) {
+        perror("Couldn't set temp file prefix");
+        ret = EXIT_FAILURE;
+        goto sort_end;
     }
 
     ret = bam_sort_core_ext(sam_order, sort_tag,
