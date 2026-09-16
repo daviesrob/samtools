@@ -45,36 +45,46 @@ DEALINGS IN THE SOFTWARE.  */
  * This function calculates ct tag for two bams, it assumes they are from the same template and
  * writes the tag to the first read in position terms.
  */
-static void bam_template_cigar(bam1_t *b1, bam1_t *b2, kstring_t *str)
+static int bam_template_cigar(bam1_t *b1, bam1_t *b2, kstring_t *str)
 {
     bam1_t *swap;
-    int i;
+    int i, nomem = 0;
     hts_pos_t end;
     uint32_t *cigar;
     str->l = 0;
-    if (b1->core.tid != b2->core.tid || b1->core.tid < 0 || b1->core.pos < 0 || b2->core.pos < 0 || b1->core.flag&BAM_FUNMAP || b2->core.flag&BAM_FUNMAP) return; // coordinateless or not on the same chr; skip
+    if (b1->core.tid != b2->core.tid || b1->core.tid < 0 || b1->core.pos < 0 || b2->core.pos < 0 || b1->core.flag&BAM_FUNMAP || b2->core.flag&BAM_FUNMAP) return 0; // coordinateless or not on the same chr; skip
     if (b1->core.pos > b2->core.pos) swap = b1, b1 = b2, b2 = swap; // make sure b1 has a smaller coordinate
-    kputc((b1->core.flag & BAM_FREAD1)? '1' : '2', str); // segment index
-    kputc((b1->core.flag & BAM_FREVERSE)? 'R' : 'F', str); // strand
+    kputc_chk(&nomem, (b1->core.flag & BAM_FREAD1)? '1' : '2', str); // segment index
+    kputc_chk(&nomem, (b1->core.flag & BAM_FREVERSE)? 'R' : 'F', str); // strand
     for (i = 0, cigar = bam_get_cigar(b1); i < b1->core.n_cigar; ++i) {
-        kputw(bam_cigar_oplen(cigar[i]), str);
-        kputc(bam_cigar_opchr(cigar[i]), str);
+        kputw_chk(&nomem, bam_cigar_oplen(cigar[i]), str);
+        kputc_chk(&nomem, bam_cigar_opchr(cigar[i]), str);
     }
     end = bam_endpos(b1);
-    kputw(b2->core.pos - end, str);
-    kputc('T', str);
-    kputc((b2->core.flag & BAM_FREAD1)? '1' : '2', str); // segment index
-    kputc((b2->core.flag & BAM_FREVERSE)? 'R' : 'F', str); // strand
+    kputw_chk(&nomem, b2->core.pos - end, str);
+    kputc_chk(&nomem, 'T', str);
+    kputc_chk(&nomem, (b2->core.flag & BAM_FREAD1)? '1' : '2', str); // segment index
+    kputc_chk(&nomem, (b2->core.flag & BAM_FREVERSE)? 'R' : 'F', str); // strand
     for (i = 0, cigar = bam_get_cigar(b2); i < b2->core.n_cigar; ++i) {
-        kputw(bam_cigar_oplen(cigar[i]), str);
-        kputc(bam_cigar_opchr(cigar[i]), str);
+        kputw_chk(&nomem, bam_cigar_oplen(cigar[i]), str);
+        kputc_chk(&nomem, bam_cigar_opchr(cigar[i]), str);
     }
 
-    uint8_t* data;
-    if ((data = bam_aux_get(b1,"ct")) != NULL) bam_aux_del(b1, data);
-    if ((data = bam_aux_get(b2,"ct")) != NULL) bam_aux_del(b2, data);
+    if (nomem)
+        return -1;
 
-    bam_aux_append(b1, "ct", 'Z', str->l+1, (uint8_t*)str->s);
+    uint8_t* data;
+    if ((data = bam_aux_get(b1,"ct")) != NULL) {
+        if (bam_aux_del(b1, data) < 0) return -1;
+    }
+    if ((data = bam_aux_get(b2,"ct")) != NULL) {
+        if (bam_aux_del(b2, data) < 0) return -1;
+    }
+
+    if (bam_aux_append(b1, "ct", 'Z', str->l+1, (uint8_t*)str->s) < 0)
+        return -1;
+
+    return 0;
 }
 
 /*
@@ -188,24 +198,29 @@ static int sync_mq_mc(bam1_t* src, bam1_t* dest)
         uint32_t mq = src->core.qual;
         uint8_t* data;
         if ((data = bam_aux_get(dest,"MQ")) != NULL) {
-            bam_aux_del(dest, data);
+            if (bam_aux_del(dest, data) < 0)
+                return -1;
         }
 
-        bam_aux_append(dest, "MQ", 'i', sizeof(uint32_t), (uint8_t*)&mq);
+        if (bam_aux_append(dest, "MQ", 'i', sizeof(uint32_t), (uint8_t*)&mq) < 0)
+            return -1;
     }
     // Copy mate cigar if either read is mapped
     if ( (src->core.flag & BAM_FUNMAP) == 0 || (dest->core.flag & BAM_FUNMAP) == 0 ) {
         uint8_t* data_mc;
         if ((data_mc = bam_aux_get(dest,"MC")) != NULL) {
-            bam_aux_del(dest, data_mc);
+            if (bam_aux_del(dest, data_mc) < 0)
+                return -1;
         }
 
         // Convert cigar to string
         kstring_t mc = { 0, 0, NULL };
-        if (bam_format_cigar(src, &mc) < 0) return -1;
-
-        bam_aux_append(dest, "MC", 'Z', ks_len(&mc)+1, (uint8_t*)ks_str(&mc));
-        free(mc.s);
+        int e = bam_format_cigar(src, &mc);
+        if (!e)
+            e = bam_aux_append(dest, "MC", 'Z', ks_len(&mc)+1, (uint8_t*)ks_str(&mc)) < 0;
+        ks_free(&mc);
+        if (e)
+            return -1;
     }
     return 0;
 }
@@ -244,7 +259,8 @@ static int add_mate_score(bam1_t *src, bam1_t *dest)
     uint32_t mate_score = calc_mate_score(src);
 
     if ((data_ms = bam_aux_get(dest, "ms")) != NULL) {
-        bam_aux_del(dest, data_ms);
+        if (bam_aux_del(dest, data_ms) < 0)
+            return -1;
     }
 
     if (bam_aux_append(dest, "ms", 'i', sizeof(uint32_t), (uint8_t*)&mate_score) == -1) {
@@ -1087,8 +1103,10 @@ static int bam_mating_core(samFile *in, samFile *out, int remove_reads,
                 cur->core.isize = pre->core.isize = 0;
             }
 
-            if (add_ct)
-                bam_template_cigar(pre, cur, &str);
+            if (add_ct) {
+                if (bam_template_cigar(pre, cur, &str) < 0)
+                    goto fail;
+            }
 
             // TODO: Add code to properly check if read is in a proper
             // pair based on ISIZE distribution
