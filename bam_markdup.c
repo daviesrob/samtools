@@ -1065,12 +1065,18 @@ static int mark_duplicates(md_param_t *param, khash_t(duplicates) *dup_hash, bam
 
     if (param->opt_dist) { // mark optical duplicates
         if (is_optical_duplicate(param, ori, dup, param->opt_dist, warn)) {
-            bam_aux_update_str(dup, "dt", 3, "SQ");
+            if (bam_aux_update_str(dup, "dt", 3, "SQ") < 0) {
+                print_error("markdup", "error, unable to append 'dt' tag.\n");
+                return -1;
+            }
             dup_type = 'O';
             (*optical)++;
         } else {
             // not an optical duplicate
-            bam_aux_update_str(dup, "dt", 3, "LB");
+            if (bam_aux_update_str(dup, "dt", 3, "LB") < 0) {
+                print_error("markdup", "error, unable to append 'dt' tag.\n");
+                return -1;
+            }
         }
     }
 
@@ -1891,7 +1897,10 @@ static int write_single_read(md_param_t *param, bam_hdr_t *header, tmp_file_t *t
 
 
     if (param->dc && !(in_read->b->core.flag & BAM_FDUP)) {
-        bam_aux_update_int(in_read->b, "dc",  in_read->dc);
+        if (bam_aux_update_int(in_read->b, "dc", in_read->dc) < 0) {
+            print_error("markdup", "error, unable to append 'dc' tag.\n");
+            return 1;
+        }
     }
 
     if (param->move_umi) {
@@ -1901,12 +1910,12 @@ static int write_single_read(md_param_t *param, bam_hdr_t *header, tmp_file_t *t
 
     if (param->supp) {
         if (tmp_file_write(temp, in_read->b)) {
-            print_error("markdup", "error, writing temp output failed on final write.\n");
+            print_error("markdup", "error, writing temp output failed.\n");
             return 1;
         }
     } else {
         if (sam_write1(param->out, header, in_read->b) < 0) {
-            print_error("markdup", "error, writing output failed on final write.\n");
+            print_error("markdup", "error, writing output failed.\n");
             return 1;
         }
     }
@@ -2051,10 +2060,16 @@ static int write_everything_with_supplementary_reads(md_param_t *param, bam_hdr_
 
                 if (param->opt_dist) {
                     if (kh_val(hashes->dup_hash, k).type) {
-                        bam_aux_update_str(b, "dt", 3, "SQ");
+                        if (bam_aux_update_str(b, "dt", 3, "SQ") < 0) {
+                            print_error("markdup", "error, unable to append 'dt' tag.\n");
+                            return 1;
+                        }
                         stat_array[kh_val(hashes->dup_hash, k).read_group].np_opt_duplicate++;
                     } else {
-                        bam_aux_update_str(b, "dt", 3, "LB");
+                        if (bam_aux_update_str(b, "dt", 3, "LB") < 0) {
+                            print_error("markdup", "error, unable to append 'dt' tag.\n");
+                            return 1;
+                        }
                     }
                 }
             }
@@ -2063,7 +2078,12 @@ static int write_everything_with_supplementary_reads(md_param_t *param, bam_hdr_
         if (!param->remove_dups || !(b->core.flag & BAM_FDUP)) {
             if (param->dc && (b->core.flag & BAM_FDUP)) {
                 uint8_t* data = bam_aux_get(b, "dc");
-                if(data) bam_aux_del(b, data);
+                if (data) {
+                    if (bam_aux_del(b, data) < 0) {
+                        print_error("markdup", "error, unable to remove 'dc' tag.\n");
+                        return 1;
+                    }
+                }
             }
 
             if (sam_write1(param->out, header, b) < 0) {
@@ -2336,11 +2356,17 @@ static int bam_mark_duplicates(md_param_t *param) {
             in_read->b->core.flag ^= BAM_FDUP;
 
             if ((data = bam_aux_get(in_read->b, "dt")) != NULL) {
-                bam_aux_del(in_read->b, data);
+                if (bam_aux_del(in_read->b, data) < 0) {
+                    print_error("markdup", "error, unable to remove 'dt' tag.\n");
+                    goto fail;
+                }
             }
 
             if ((data = bam_aux_get(in_read->b, "do")) != NULL) {
-                bam_aux_del(in_read->b, data);
+                if (bam_aux_del(in_read->b, data) < 0) {
+                    print_error("markdup", "error, unable to remove 'do' tag.\n");
+                    goto fail;
+                }
             }
         }
 
@@ -2542,7 +2568,12 @@ int bam_markdup(int argc, char **argv) {
             case 'r': param.remove_dups = 1; break;
             case 'l': param.max_length = atoi(optarg); break;
             case 's': param.do_stats = 1; break;
-            case 'T': kputs(optarg, &tmpprefix); break;
+            case 'T':
+                if (kputs(optarg, &tmpprefix) < 0) {
+                    print_error("markdup", "out of memory");
+                    return 1;
+                }
+                break;
             case 'S': param.supp = 1; break;
             case 't': param.tag = 1; break;
             case 'f': param.stats_file = optarg; param.do_stats = 1; break;
@@ -2703,19 +2734,31 @@ int bam_markdup(int argc, char **argv) {
 
     // we need temp files so fix up the name here
     if (tmpprefix.l == 0) {
-
+        int nomem = 0;
         if (strcmp(argv[optind + 1], "-") != 0)
-            ksprintf(&tmpprefix, "%s.", argv[optind + 1]);
+            ksprintf_chk(&nomem, &tmpprefix, "%s.", argv[optind + 1]);
         else
-            kputc('.', &tmpprefix);
+            kputc_chk(&nomem, '.', &tmpprefix);
+        if (nomem) {
+            print_error("markdup", "out of memory");
+            return 1;
+        }
     }
 
     if (stat(tmpprefix.s, &st) == 0 && S_ISDIR(st.st_mode)) {
-        if (tmpprefix.s[tmpprefix.l-1] != '/') kputc('/', &tmpprefix);
+        if (tmpprefix.s[tmpprefix.l-1] != '/') {
+            if (kputc('/', &tmpprefix) < 0) {
+                print_error("markdup", "out of memory");
+                return 1;
+            }
+        }
     }
 
     t = ((unsigned) time(NULL)) ^ ((unsigned) clock());
-    ksprintf(&tmpprefix, "samtools.%d.%u.tmp", (int) getpid(), t % 10000);
+    if (ksprintf(&tmpprefix, "samtools.%d.%u.tmp", (int) getpid(), t % 10000) < 0) {
+        print_error("markdup", "out of memory");
+        return 1;
+    }
     param.prefix = tmpprefix.s;
 
     param.arg_list = stringify_argv(argc + 1, argv - 1);
