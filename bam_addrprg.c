@@ -65,7 +65,7 @@ struct state {
     samFile* output_file;
     sam_hdr_t* output_header;
     char* rg_id;
-    void (*mode_func)(const state_t*, bam1_t*);
+    int (*mode_func)(const state_t*, bam1_t*);
 };
 
 static void cleanup_opts(parsed_opts_t* opts)
@@ -215,17 +215,23 @@ static bool parse_args(int argc, char** argv, parsed_opts_t** opts)
 
     while ((n = getopt_long(argc, argv, "r:R:m:o:O:h@:uw", lopts, NULL)) >= 0) {
         switch (n) {
-            case 'r':
+            case 'r': {
+                int nomem = 0;
                 // Are we adding to existing rg line?
                 if (ks_len(&rg_line) == 0) {
                     if (strlen(optarg)<3 || (optarg[0] != '@' && optarg[1] != 'R' && optarg[2] != 'G')) {
-                        kputs("@RG\t", &rg_line);
+                        kputs_chk(&nomem, "@RG\t", &rg_line);
                     }
                 } else {
-                    kputs("\t", &rg_line);
+                    kputs_chk(&nomem, "\t", &rg_line);
                 }
-                kputs(optarg, &rg_line);
+                kputs_chk(&nomem, optarg, &rg_line);
+                if (nomem) {
+                    fprintf(stderr, "[%s] Out of memory adding @RG line\n", __func__);
+                    return false;
+                }
                 break;
+            }
             case 'R':
                 // NB: Can be allocated in get_rg_id
                 free(retval->rg_id);
@@ -310,26 +316,33 @@ static bool parse_args(int argc, char** argv, parsed_opts_t** opts)
     return true;
 }
 
-static void overwrite_all_func(const state_t* state, bam1_t* file_read)
+static int overwrite_all_func(const state_t* state, bam1_t* file_read)
 {
     int len = strlen(state->rg_id)+1;
     // If the old exists delete it
     uint8_t* old = bam_aux_get(file_read, "RG");
     if (old != NULL) {
-        bam_aux_del(file_read, old);
+        if (bam_aux_del(file_read, old) < 0)
+            return -1;
     }
 
-    bam_aux_append(file_read, "RG", 'Z', len, (const uint8_t *)state->rg_id);
+    if (bam_aux_append(file_read, "RG", 'Z', len, (const uint8_t *)state->rg_id) < 0)
+        return -1;
+
+    return 0;
 }
 
-static void orphan_only_func(const state_t* state, bam1_t* file_read)
+static int orphan_only_func(const state_t* state, bam1_t* file_read)
 {
     int len = strlen(state->rg_id)+1;
     // If the old exists don't do anything
     uint8_t* old = bam_aux_get(file_read, "RG");
     if (old == NULL) {
-        bam_aux_append(file_read, "RG",'Z',len, (const uint8_t *)state->rg_id);
+        if (bam_aux_append(file_read, "RG",'Z',len, (const uint8_t *)state->rg_id) < 0)
+            return -1;
     }
+
+    return 0;
 }
 
 static bool init(const parsed_opts_t* opts, state_t** state_out) {
@@ -452,7 +465,12 @@ static bool readgroupise(parsed_opts_t *opts, state_t* state, char *arg_list)
     bam1_t* file_read = bam_init1();
     int ret;
     while ((ret = sam_read1(state->input_file, state->input_header, file_read)) >= 0) {
-        state->mode_func(state, file_read);
+        if (state->mode_func(state, file_read) < 0) {
+            print_error_errno("addreplacerg", "[%s] Could not update record", __func__);
+            bam_destroy1(file_read);
+            free(idx_fn);
+            return false;
+        }
 
         if (sam_write1(state->output_file, state->output_header, file_read) < 0) {
             print_error_errno("addreplacerg", "[%s] Could not write read to output file", __func__);
