@@ -2308,13 +2308,17 @@ void output_split_stats(khash_t(c2stats) *split_hash, char* bam_fname, int spars
         round_buffer_flush(curr_stats, -1);
 
         output_filename.l = 0;
+        int nomem = 0;
         if (curr_stats->info->split_prefix)
-            kputs(curr_stats->info->split_prefix, &output_filename);
+            kputs_chk(&nomem, curr_stats->info->split_prefix, &output_filename);
         else
-            kputs(bam_fname, &output_filename);
-        kputc('_', &output_filename);
-        kputs(curr_stats->split_name, &output_filename);
-        kputs(".bamstat", &output_filename);
+            kputs_chk(&nomem, bam_fname, &output_filename);
+        kputc_chk(&nomem, '_', &output_filename);
+        kputs_chk(&nomem, curr_stats->split_name, &output_filename);
+        kputs_chk(&nomem, ".bamstat", &output_filename);
+        if (nomem) {
+            error("Out of memory\n");
+        }
 
         FILE *to = fopen(output_filename.s, "w");
         if(to == NULL){
@@ -2648,14 +2652,17 @@ void collect_refstats(stats_t *stats)
 
             ++rstat->refseq_count;
             if (!alltrgts) {    //given regions alone
+                int nomem = 0;
                 ks_clear(&regname);
                 tmp = sam_hdr_tid2len(stats->info->sam_header,  i);
                 if (stats->regions[i].pos[j].beg == 1 && stats->regions[i].pos[j].end == HTS_POS_MAX) {
                     //full seq, use name
-                    ksprintf(&regname, "%s", name);
+                    ksprintf_chk(&nomem, &regname, "%s", name);
                 } else {    //range, use name:start-end
-                    ksprintf(&regname, "%s:%"PRIhts_pos"-%"PRIhts_pos, name, start, end);
+                    ksprintf_chk(&nomem, &regname, "%s:%"PRIhts_pos"-%"PRIhts_pos, name, start, end);
                 }
+                if (nomem)
+                    error("Out of memory");
                 rstat->refseq_name[regcnt] = regname.l ? strdup(regname.s) : NULL;
                 rstat->reflen[regcnt] = end - start + 1;   //both included
                 rstat->reflen[regcnt] = rstat->reflen[regcnt] < tmp ?
