@@ -818,11 +818,15 @@ static int bam_clip(samFile *in, samFile *out, samFile *reject, char *bedfile,
                     if (param->del_tag) {
                         uint8_t *tag;
 
-                        if ((tag = bam_aux_get(b, "NM")))
-                            bam_aux_del(b, tag);
+                        if ((tag = bam_aux_get(b, "NM"))) {
+                            if (bam_aux_del(b, tag) < 0)
+                                goto fail;
+                        }
 
-                        if ((tag = bam_aux_get(b, "MD")))
-                            bam_aux_del(b, tag);
+                        if ((tag = bam_aux_get(b, "MD"))) {
+                            if (bam_aux_del(b, tag) < 0)
+                                goto fail;
+                        }
                     }
 
                     been_clipped = 1;
@@ -873,11 +877,15 @@ static int bam_clip(samFile *in, samFile *out, samFile *reject, char *bedfile,
                     }
 
                     if (param->del_tag) {
-                        if ((tag = bam_aux_get(b, "NM")))
-                            bam_aux_del(b, tag);
+                        if ((tag = bam_aux_get(b, "NM"))) {
+                            if (bam_aux_del(b, tag) < 0)
+                                goto fail;
+                        }
 
-                        if ((tag = bam_aux_get(b, "MD")))
-                            bam_aux_del(b, tag);
+                        if ((tag = bam_aux_get(b, "MD"))) {
+                            if (bam_aux_del(b, tag) < 0)
+                                goto fail;
+                        }
                     }
                 }
 
