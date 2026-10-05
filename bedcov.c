@@ -1,7 +1,7 @@
 /*  bedcov.c -- bedcov subcommand.
 
     Copyright (C) 2012 Broad Institute.
-    Copyright (C) 2013-2014, 2018-2022, 2024 Genome Research Ltd.
+    Copyright (C) 2013-2014, 2018-2022, 2024, 2026 Genome Research Ltd.
 
     Author: Heng Li <lh3@sanger.ac.uk>
 
@@ -336,24 +336,34 @@ int main_bedcov(int argc, char *argv[])
             break;
         }
 
+        int nomem = 0;
+
         for (i = 0; i < n; ++i) {
-            kputc('\t', &str);
-            kputl(cnt[i], &str);
+            kputc_chk(&nomem, '\t', &str);
+            kputl_chk(&nomem, cnt[i], &str);
         }
         if (min_depth >= 0) {
             for (i = 0; i < n; ++i) {
-                kputc('\t', &str);
-                kputl(pcov[i], &str);
+                kputc_chk(&nomem, '\t', &str);
+                kputl_chk(&nomem, pcov[i], &str);
             }
         }
         if (do_rcount) {
             for (i = 0; i < n; ++i) {
-                kputc('\t', &str);
-                kputl(aux[i]->rcnt, &str);
+                kputc_chk(&nomem, '\t', &str);
+                kputl_chk(&nomem, aux[i]->rcnt, &str);
             }
         }
-        puts(str.s);
+
         bam_mplp_destroy(mplp);
+
+        if (nomem) {
+            fprintf(stderr, "Out of memory\n");
+            status = 2;
+            break;
+        }
+
+        puts(str.s);
         continue;
 
 bed_error:
