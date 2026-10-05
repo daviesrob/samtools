@@ -476,7 +476,8 @@ static int bamshuf(const char *fn, int n_files, const char *pre, int clevel,
         free(fnt[i]);
         fnt[i] = NULL;
 
-        ks_introsort(bamshuf, c, a); // Shuffle all the reads
+        if (ks_introsort(bamshuf, c, a) < 0) // Shuffle all the reads
+            goto mem_fail;
 
         // Write them out again
         for (j = 0; j < c; ++j) {
