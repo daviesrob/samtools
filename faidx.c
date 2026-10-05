@@ -166,7 +166,11 @@ int writeindex(output *out, char *output_file)
     FILE *fp = NULL;
     size_t i = 0;
 
-    ksprintf(&fainame, "%s.fai", output_file);
+    if (ksprintf(&fainame, "%s.fai", output_file) < 0) {
+        fprintf(stderr, "[faidx] Out of memory");
+        ret = 1;
+        goto end;
+    }
 
     if (!(fp = fopen(fainame.s, "w"))) {
         fprintf(stderr, "[faidx] Failed to create index file for output.\n");
@@ -181,18 +185,24 @@ int writeindex(output *out, char *output_file)
     for (i = 0; i < idxdata->n; ++i) {
         idx_entry *e = &idxdata->indx[i];
         ks_clear(&buffer);
+        int nomem = 0;
         if (idxdata->format == FAI_FASTA) {
             //name, seq leng, seq offset, seq per line, char per line
-            ksprintf(&buffer, "%s\t%"PRIu64"\t%"PRIu64"\t%"PRIu64"\t%"
-                     PRIu64"\n",
-                     e->name, e->seq_length, e->seq_offset, e->line_length,
-                     e->line_length + 1);
+            ksprintf_chk(&nomem, &buffer,
+                         "%s\t%"PRIu64"\t%"PRIu64"\t%"PRIu64"\t%"PRIu64"\n",
+                         e->name, e->seq_length, e->seq_offset, e->line_length,
+                         e->line_length + 1);
         } else {    //FAI_FASTQ
             //name, seq leng, seq offset, seq/line, char/line, qual offset
-            ksprintf(&buffer, "%s\t%"PRIu64"\t%"PRIu64"\t%"PRIu64"\t%"
-                     PRIu64"\t%"PRIu64"\n",
-                     e->name, e->seq_length, e->seq_offset, e->line_length,
-                     e->line_length + 1, e->qual_offset);
+            ksprintf_chk(&nomem, &buffer,
+                         "%s\t%"PRIu64"\t%"PRIu64"\t%"PRIu64"\t%"PRIu64"\t%"PRIu64"\n",
+                         e->name, e->seq_length, e->seq_offset, e->line_length,
+                         e->line_length + 1, e->qual_offset);
+        }
+        if (nomem) {
+            fprintf(stderr, "[faidx] Out of memory\n");
+            ret = 1;
+            goto end;
         }
         if (buffer.l != fwrite(buffer.s, 1, buffer.l, fp)) {
             fprintf(stderr, "[faidx] Failed to create fai index file for "
@@ -279,6 +289,10 @@ static int write_output(faidx_t *faid, output *out, const char *name,
     len = ksprintf(&out->buffer, "%c%s%s\n",
                    format == FAI_FASTA ? '>' : '@', name,
                    rev ? neg_strand_name : pos_strand_name);
+    if (len < 0) {
+        fprintf(stderr,"[faidx] Failed to allocate memory.\n");
+        goto end;
+    }
     if (out->gopt->write_index) {
         if (!(idx_name = strdup(out->buffer.s+1))) {
             fprintf(stderr,"[faidx] Failed to allocate memory.\n");
