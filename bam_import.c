@@ -143,7 +143,7 @@ static int append_index(kstring_t *s, kstring_t *q, bam1_t *b) {
 }
 
 static int import_fastq(int argc, char **argv, opts_t *opts) {
-    int i, n, ret = 0;
+    int i, n, ret = 0, nomem = 0;
     samFile *fp_in[FQ_END] = {NULL};
     bam1_t *b = bam_init1();
     int ids[FQ_END];
@@ -202,33 +202,33 @@ static int import_fastq(int argc, char **argv, opts_t *opts) {
 
         switch (i) {
         case FQ_I1:
-            kputs(" --i1 I1.fastq", &read_str);
-            kputs("i*", &index_str);
+            kputs_chk(&nomem, " --i1 I1.fastq", &read_str);
+            kputs_chk(&nomem, "i*", &index_str);
             break;
         case FQ_I2:
-            kputs(" --i2 I2.fastq", &read_str);
-            kputs("i*", &index_str);
+            kputs_chk(&nomem, " --i2 I2.fastq", &read_str);
+            kputs_chk(&nomem, "i*", &index_str);
             break;
 
         case FQ_R0:
-            kputs(" -0 unpaired.fastq", &read_str);
+            kputs_chk(&nomem, " -0 unpaired.fastq", &read_str);
             break;
 
         case FQ_R1:
-            kputs(" -1 R1.fastq", &read_str);
+            kputs_chk(&nomem, " -1 R1.fastq", &read_str);
             break;
 
         case FQ_R2:
-            kputs(" -2 R2.fastq", &read_str);
+            kputs_chk(&nomem, " -2 R2.fastq", &read_str);
             break;
 
         case FQ_SINGLE:
-            kputs(" -n -o paired.fastq", &read_str);
+            kputs_chk(&nomem, " -n -o paired.fastq", &read_str);
             break;
 
         default:
             ks_clear(&read_str); // not reversible
-            kputs("", &read_str);
+            kputs_chk(&nomem, "", &read_str);
         }
     }
     if (n == 0) {
@@ -237,13 +237,19 @@ static int import_fastq(int argc, char **argv, opts_t *opts) {
     }
 
     if (opts->casava) {
-        kputs(" -i", &read_str);
+        kputs_chk(&nomem, " -i", &read_str);
         if (!index_str.l)
-            kputs(" --index-format 'i*i*'", &read_str);
+            kputs_chk(&nomem, " --index-format 'i*i*'", &read_str);
     }
 
     if (opts->UMI)
-        ksprintf(&read_str, " -U --UMI-tag %s", opts->UMI_tag);
+        ksprintf_chk(&nomem, &read_str, " -U --UMI-tag %s", opts->UMI_tag);
+
+    if (nomem) {
+        print_error("view", "out of memory");
+        ret = -1;
+        goto err;
+    }
 
     char out_mode[10] = {'w', 0, 0};
     if (opts->compress_level != -1)
@@ -298,11 +304,17 @@ static int import_fastq(int argc, char **argv, opts_t *opts) {
     // Read group
     if (opts->rg_line) {
         if (*opts->rg_line != '@')
-            ksprintf(&rg_line, "@RG\t%s", opts->rg_line);
+            ksprintf_chk(&nomem, &rg_line, "@RG\t%s", opts->rg_line);
         else
-            kputs(opts->rg_line, &rg_line);
+            kputs_chk(&nomem, opts->rg_line, &rg_line);
     } else if (opts->rg) {
-        ksprintf(&rg_line, "@RG\tID:%s", opts->rg);
+        ksprintf_chk(&nomem, &rg_line, "@RG\tID:%s", opts->rg);
+    }
+
+    if (nomem) {
+        print_error("import", "out of memory");
+        ret = -1;
+        goto err;
     }
 
     if (ks_len(&rg_line)) {
@@ -524,15 +536,21 @@ int main_import(int argc, char *argv[]) {
         case 'T': opts.aux = optarg; break;
         case 'u': opts.compress_level = 0; break;
         case 'R': opts.rg = optarg; break;
-        case 'r':
+        case 'r': {
+            int nomem = 0;
             if (*optarg != '@' && ks_len(&rg) == 0)
-                kputs("@RG", &rg);
+                kputs_chk(&nomem, "@RG", &rg);
             if (ks_len(&rg))
-                kputc_('\t', &rg);
-            kputs(optarg, &rg);
+                kputc_chk_(&nomem, '\t', &rg);
+            kputs_chk(&nomem, optarg, &rg);
+            if (nomem) {
+                fprintf(stderr, "Out of memory\n");
+                ks_free(&rg);
+                return 1;
+            }
             opts.rg_line = rg.s;
             break;
-
+        }
         case 'N': opts.name2 = 1; break;
         case 'E': opts.allow_empty = 1; break;
 
