@@ -97,7 +97,10 @@ static int unpad_seq(bam1_t *b, kstring_t *s)
     // We need the padded length after alignment from the CIGAR (excluding
     // soft clips S, but including pads from CIGAR D operations)
     length = bam_cigar2rlen(b->core.n_cigar, cigar);
-    ks_resize(s, length);
+    if (ks_resize(s, length) < 0) {
+        fprintf(stderr, "[depad] ERROR: Out of memory\n");
+        return -1;
+    }
     for (k = 0, s->l = 0, j = 0; k < b->core.n_cigar; ++k) {
         int op, ol;
         op = bam_cigar_op(cigar[k]);
@@ -137,7 +140,11 @@ int load_unpadded_ref(faidx_t *fai, const char *ref_name, hts_pos_t ref_len, kst
         free(fai_ref);
         return -1;
     }
-    ks_resize(seq, ref_len);
+    if (ks_resize(seq, ref_len) < 0) {
+        fprintf(stderr, "[depad] ERROR: Out of memory\n");
+        free(fai_ref);
+        return -1;
+    }
     seq->l = 0;
     for (k = 0; k < ref_len; ++k) {
         base = fai_ref[k];
