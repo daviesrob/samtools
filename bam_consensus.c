@@ -2427,8 +2427,11 @@ static int basic_fasta(void *cd, samFile *fp, sam_hdr_t *h, pileup_t *p,
     }
 
     if (opts->mark_ins && nth && cb != '*') {
-        kputc('_', seq);
-        kputc('_', qual);
+        int nomem = 0;
+        kputc_chk(&nomem, '_', seq);
+        kputc_chk(&nomem, '_', qual);
+        if (nomem)
+            return -1;
     }
 
     // Append consensus base/qual to seqs
@@ -2594,8 +2597,11 @@ int append_cons(ctx *c, kstring_t *seq, kstring_t *qual,
 
     // The real sequence
     if (ks_seq_l) {
-        kputsn(ks_seq,  ks_seq_l,  seq);
-        kputsn(ks_qual, ks_qual_l, qual);
+        int nomem = 0;
+        kputsn_chk(&nomem, ks_seq,  ks_seq_l,  seq);
+        kputsn_chk(&nomem, ks_qual, ks_qual_l, qual);
+        if (nomem)
+            return -1;
 
         // Any post Ns
         hts_pos_t Nlen = c->end - c->last_pos;
@@ -2691,7 +2697,8 @@ int pileup_loop_parallel(consensus_opts *opts) {
         thread; filters requiring header also needs this irrespective of file
         type; it is easy to copy from tdata[0] rather than reading and parsing;
         will be released along with file close */
-        sam_hdr_set(tdata[i].fp, opts->h, 0);
+        if (sam_hdr_set(tdata[i].fp, opts->h, 0) < 0)
+            goto err;
     }
 
     pool = hts_tpool_init(opts->nthreads);
