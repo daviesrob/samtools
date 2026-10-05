@@ -85,13 +85,14 @@ typedef struct {
     void *bed;
 } depth_opt;
 
-static void zero_region(depth_opt *opt, depth_hist *dh,
-                        const char *name, hts_pos_t start, hts_pos_t end) {
+static int zero_region(depth_opt *opt, depth_hist *dh,
+                       const char *name, hts_pos_t start, hts_pos_t end) {
     hts_pos_t i;
     kstring_t *ks = &dh->ks;
+    int nomem = 0;
 
-    kputs(name, ks_clear(ks));
-    kputc('\t', ks);
+    kputs_chk(&nomem, name, ks_clear(ks));
+    kputc_chk(&nomem, '\t', ks);
     size_t cur_l = ks->l;
     if (dh->beg >= 0 && start < dh->beg)
         start = dh->beg;
@@ -105,16 +106,19 @@ static void zero_region(depth_opt *opt, depth_hist *dh,
             continue;
 
         ks->l = cur_l;
-        kputll(i+1,  ks);
+        kputll_chk(&nomem, i+1,  ks);
         int n;
         for (n = 0; n < dh->nfiles; n++) {
-            kputc_('\t', ks);
-            kputc_('0',  ks);
+            kputc_chk_(&nomem, '\t', ks);
+            kputc_chk_(&nomem, '0',  ks);
         }
-        kputc('\n',  ks);
+        kputc_chk(&nomem, '\n',  ks);
+        if (nomem)
+            return -1;
         fputs(ks->s, opt->out);
     }
     ks->l = cur_l;
+    return 0;
 }
 
 // A variation of bam_cigar2qlen which doesn't count soft-clips in to the
@@ -219,7 +223,7 @@ static int add_depth(depth_opt *opt, depth_hist *dh, sam_hdr_t *h, bam1_t *b,
                      int overlap_clip, int file) {
     hts_pos_t i;
     size_t hmask = dh->size-1;
-    int n;
+    int n, nomem = 0;
 
     if (!b || b->core.tid != dh->last_ref) {
         // New ref
@@ -241,22 +245,25 @@ static int add_depth(depth_opt *opt, depth_hist *dh, sam_hdr_t *h, bam1_t *b,
                     continue;
 
                 dh->ks.l = cur_l;
-                kputll(i+1, &dh->ks);
+                kputll_chk(&nomem, i+1, &dh->ks);
                 for (n = 0; n < dh->nfiles; n++) {
-                    kputc_('\t', &dh->ks);
+                    kputc_chk_(&nomem, '\t', &dh->ks);
                     int d = i < dh->end_pos[n]
                         ? dh->hist[n][i & hmask]
                         : 0;
-                    kputuw(d, &dh->ks);
+                    kputuw_chk(&nomem, d, &dh->ks);
                 }
-                kputc('\n', &dh->ks);
+                kputc_chk(&nomem, '\n', &dh->ks);
+                if (nomem)
+                    return -1;
                 fputs(dh->ks.s, opt->out);
             }
             if (opt->all_pos) {
                 // End of last ref
-                zero_region(opt, dh,
-                            sam_hdr_tid2name(h, dh->last_ref),
-                            i, sam_hdr_tid2len(h, dh->last_ref));
+                if (zero_region(opt, dh,
+                                sam_hdr_tid2name(h, dh->last_ref),
+                                i, sam_hdr_tid2len(h, dh->last_ref)) < 0)
+                    return -1;
             }
             dh->ks.l = cur_l;
         }
@@ -265,19 +272,22 @@ static int add_depth(depth_opt *opt, depth_hist *dh, sam_hdr_t *h, bam1_t *b,
             // Any previous unused refs
             int lr = dh->last_ref < 0 ? 0 : dh->last_ref+1;
             int rr = b ? b->core.tid : sam_hdr_nref(h), r;
-            for (r = lr; r < rr; r++)
-                zero_region(opt, dh,
-                            sam_hdr_tid2name(h, r),
-                            0, sam_hdr_tid2len(h, r));
+            for (r = lr; r < rr; r++) {
+                if (zero_region(opt, dh,
+                                sam_hdr_tid2name(h, r),
+                                0, sam_hdr_tid2len(h, r)) < 0)
+                    return -1;
+            }
         }
 
         if (!b) {
             // we're just flushing to end of file
-            if (opt->all_pos && opt->reg && dh->last_ref < 0)
+            if (opt->all_pos && opt->reg && dh->last_ref < 0) {
                 // -a or -aa without a single read being output yet
-                zero_region(opt, dh, sam_hdr_tid2name(h, dh->tid), dh->beg,
-                            MIN(dh->end, sam_hdr_tid2len(h, dh->tid)));
-
+                if (zero_region(opt, dh, sam_hdr_tid2name(h, dh->tid), dh->beg,
+                                MIN(dh->end, sam_hdr_tid2len(h, dh->tid))) < 0)
+                    return -1;
+            }
             return 0;
         }
 
@@ -288,12 +298,14 @@ static int add_depth(depth_opt *opt, depth_hist *dh, sam_hdr_t *h, bam1_t *b,
             : b->core.pos;
         dh->last_ref = b->core.tid;
         dh->ref = sam_hdr_tid2name(h, b->core.tid);
-        kputs(dh->ref, ks_clear(&dh->ks));
-        kputc('\t', &dh->ks);
+        kputs_chk(&nomem, dh->ref, ks_clear(&dh->ks));
+        kputc_chk(&nomem, '\t', &dh->ks);
 
-        if (opt->all_pos)
+        if (opt->all_pos) {
             // Start of ref
-            zero_region(opt, dh, dh->ref, 0, b->core.pos);
+            if (zero_region(opt, dh, dh->ref, 0, b->core.pos) < 0)
+                return -1;
+        }
     } else {
         if (dh->last_output < b->core.pos) {
             // Flush any depth outputs up to start of new read
@@ -312,20 +324,24 @@ static int add_depth(depth_opt *opt, depth_hist *dh, sam_hdr_t *h, bam1_t *b,
                     continue;
 
                 dh->ks.l = cur_l;
-                kputll(i+1, &dh->ks);
+                kputll_chk(&nomem, i+1, &dh->ks);
                 for (n = 0; n < dh->nfiles; n++) {
-                    kputc_('\t', &dh->ks);
+                    kputc_chk_(&nomem, '\t', &dh->ks);
                     int d = i < dh->end_pos[n]
                         ? dh->hist[n][i & hmask]
                         : 0;
-                    kputuw(d, &dh->ks);
+                    kputuw_chk(&nomem, d, &dh->ks);
                 }
-                kputc('\n', &dh->ks);
+                kputc_chk(&nomem, '\n', &dh->ks);
+                if (nomem)
+                    return -1;
                 fputs(dh->ks.s, opt->out);
             }
-            if (opt->all_pos && i < b->core.pos)
+            if (opt->all_pos && i < b->core.pos) {
                 // Hole in middle of ref
-                zero_region(opt, dh, dh->ref, i, b->core.pos);
+                if (zero_region(opt, dh, dh->ref, i, b->core.pos) < 0)
+                    return -1;
+            }
 
             dh->ks.l = cur_l;
             dh->last_output = b->core.pos;
