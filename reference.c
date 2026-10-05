@@ -250,7 +250,8 @@ static int cram2ref(samFile *in, sam_hdr_t *h, hts_idx_t *idx, char *reg,
                 if (!(blk = cram_read_block(in_c)))
                     goto err;
                 if (cram_block_get_content_id(blk) == embed_id) {
-                    cram_uncompress_block(blk);
+                    if (cram_uncompress_block(blk) < 0)
+                        goto err;
                     //printf("%.*s\n", blk->uncomp_size, blk->data);
 
                     int32_t usize = cram_block_get_uncomp_size(blk);
