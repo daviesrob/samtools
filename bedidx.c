@@ -147,7 +147,8 @@ static int bed_index(reghash_t *h)
                 free(p->idx);
                 p->idx = NULL;
             }
-            ks_introsort(hts_pair_pos_t, p->n, p->a);
+            if (ks_introsort(hts_pair_pos_t, p->n, p->a) < 0)
+                return -1;
             if (bed_index_core(p) != 0) {
                 return -1;
             }
