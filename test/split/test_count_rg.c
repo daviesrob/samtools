@@ -29,14 +29,16 @@ DEALINGS IN THE SOFTWARE.  */
 #include <stdlib.h>
 #include <unistd.h>
 
-void setup_test_1(sam_hdr_t** hdr_in)
+static int setup_test_1(sam_hdr_t** hdr_in)
 {
     *hdr_in = sam_hdr_init();
+    if (!*hdr_in)
+        return -1;
     const char *test1 =
     "@HD\tVN:1.4\n"
     "@SQ\tSN:blah\tLN:150\n"
     "@RG\tID:fish\n";
-    sam_hdr_add_lines(*hdr_in, test1, 0);
+    return sam_hdr_add_lines(*hdr_in, test1, 0);
 }
 
 int main(int argc, char**argv)
@@ -75,7 +77,10 @@ int main(int argc, char**argv)
     sam_hdr_t* hdr1;
     size_t count;
     char** output;
-    setup_test_1(&hdr1);
+    if (setup_test_1(&hdr1) < 0) {
+        fprintf(stderr, "Failed to set up test 1\n");
+        return EXIT_FAILURE;
+    }
     if (verbose > 1) {
         printf("hdr1\n");
         dump_hdr(hdr1);

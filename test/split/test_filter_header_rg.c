@@ -86,14 +86,16 @@ bool hdrcmp(const char *hdr1, const char *hdr2) {
     return res?false:true;
 }
 
-void setup_test_1(sam_hdr_t** hdr_in)
+static int setup_test_1(sam_hdr_t** hdr_in)
 {
     *hdr_in = sam_hdr_init();
+    if (!*hdr_in)
+        return -1;
     const char *test1 =
     "@HD\tVN:1.4\n"
     "@SQ\tSN:blah\tLN:1\n"
     "@RG\tID:fish\n";
-    sam_hdr_add_lines(*hdr_in, test1, 0);
+    return sam_hdr_add_lines(*hdr_in, test1, 0);
 }
 
 bool check_test_1(sam_hdr_t* hdr) {
@@ -105,14 +107,16 @@ bool check_test_1(sam_hdr_t* hdr) {
     return hdrcmp(sam_hdr_str(hdr), test1_res);
 }
 
-void setup_test_2(sam_hdr_t** hdr_in)
+static int setup_test_2(sam_hdr_t** hdr_in)
 {
     *hdr_in = sam_hdr_init();
+    if (!*hdr_in)
+        return -1;
     const char *test2 =
     "@HD\tVN:1.4\n"
     "@SQ\tSN:blah\tLN:1\n"
     "@RG\tID:fish\n";
-    sam_hdr_add_lines(*hdr_in, test2, 0);
+    return sam_hdr_add_lines(*hdr_in, test2, 0);
 }
 
 bool check_test_2(sam_hdr_t* hdr) {
@@ -125,9 +129,11 @@ bool check_test_2(sam_hdr_t* hdr) {
     return hdrcmp(sam_hdr_str(hdr), test2_res);
 }
 
-void setup_test_3(sam_hdr_t** hdr_in)
+static int setup_test_3(sam_hdr_t** hdr_in)
 {
     *hdr_in = sam_hdr_init();
+    if (!*hdr_in)
+        return -1;
     const char *test3 =
     "@HD\tVN:1.4\n"
     "@SQ\tSN:blah\tLN:1\n"
@@ -135,7 +141,7 @@ void setup_test_3(sam_hdr_t** hdr_in)
     "@RG\tID:fish2\n"
     "@RG\tID:fish3\n"
     "@RG\tID:fish4\n";
-    sam_hdr_add_lines(*hdr_in, test3, 0);
+    return sam_hdr_add_lines(*hdr_in, test3, 0);
 }
 
 bool check_test_3(sam_hdr_t* hdr) {
@@ -184,7 +190,10 @@ int main(int argc, char *argv[])
     if (verbose) printf("BEGIN test 1\n");  // test eliminating a tag that isn't there
     sam_hdr_t* hdr1;
     const char* id_to_keep_1 = "1#2.3";
-    setup_test_1(&hdr1);
+    if (setup_test_1(&hdr1) < 0) {
+        fprintf(stderr, "Failed to set up test 1\n");
+        return EXIT_FAILURE;
+    }
     if (verbose > 1) {
         printf("hdr1\n");
         dump_hdr(hdr1);
@@ -227,7 +236,10 @@ int main(int argc, char *argv[])
     if (verbose) printf("BEGIN test 2\n");  // test eliminating a tag that is there
     sam_hdr_t* hdr2;
     const char* id_to_keep_2 = "fish";
-    setup_test_2(&hdr2);
+    if (setup_test_2(&hdr2) < 0) {
+        fprintf(stderr, "Failed to set up test 2\n");
+        return EXIT_FAILURE;
+    }
     if (verbose > 1) {
         printf("hdr2\n");
         dump_hdr(hdr2);
@@ -269,7 +281,10 @@ int main(int argc, char *argv[])
 
     if (verbose) printf("BEGIN test 3\n");  // test eliminating a tag that is there
     sam_hdr_t* hdr3;
-    setup_test_3(&hdr3);
+    if (setup_test_3(&hdr3) < 0) {
+        fprintf(stderr, "Failed to set up test 1\n");
+        return EXIT_FAILURE;
+    }
     if (verbose > 1) {
         printf("hdr3\n");
         dump_hdr(hdr3);
