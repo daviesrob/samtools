@@ -88,8 +88,7 @@ TEST_PROGRAMS = \
 	test/split/test_count_rg \
 	test/split/test_expand_format_string \
 	test/split/test_filter_header_rg \
-	test/split/test_parse_args \
-	test/vcf-miniview
+	test/split/test_parse_args
 
 all: $(PROGRAMS) $(MISC_PROGRAMS) $(TEST_PROGRAMS)
 
