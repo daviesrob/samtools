@@ -46,7 +46,9 @@ static void HTS_FORMAT(HTS_PRINTF_FMT, 2, 0)
 vprint_error_core(const char *subcommand, const char *format, va_list args, const char *extra)
 {
     fflush(stdout);
-    if (samtools_stdout) hts_flush(samtools_stdout);
+    if (samtools_stdout) {
+        if (hts_flush(samtools_stdout) < 0) { /* Ignore failures */ }
+    }
 
     if (subcommand && *subcommand) fprintf(stderr, "samtools %s: ", subcommand);
     else fprintf(stderr, "samtools: ");
