@@ -1,6 +1,7 @@
 /* The MIT License
 
-   Copyright (c) 2011  Heng Li <lh3@live.co.uk>
+   Copyright (C) 2011  Heng Li <lh3@live.co.uk>
+   Copyright (C) 2026 Genome Research Ltd.
 
    Permission is hereby granted, free of charge, to any person obtaining
    a copy of this software and associated documentation files (the
@@ -41,7 +42,9 @@ KSTREAM_INIT(gzFile, gzread, 16384)
 #define write_cigar(_c, _n, _m, _v) do { \
         if (_n == _m) { \
             _m = _m? _m<<1 : 4; \
-            _c = realloc(_c, _m * sizeof(unsigned)); \
+            unsigned *new_c = realloc(_c, _m * sizeof(unsigned)); \
+            if (!new_c) fatal("Out of memory"); \
+            _c = new_c; \
         } \
         _c[_n++] = (_v); \
     } while (0)
@@ -53,15 +56,17 @@ static void fatal(const char *msg)
     exit(1);
 }
 // remove pads
-static void remove_pads(const kstring_t *src, kstring_t *dst)
+static int remove_pads(const kstring_t *src, kstring_t *dst)
 {
     int i, j;
     dst->l = 0;
-    kputsn(src->s, src->l, dst);
+    if (kputsn(src->s, src->l, dst) < 0)
+        return -1;
     for (i = j = 0; i < dst->l; ++i)
         if (dst->s[i] != '*') dst->s[j++] = dst->s[i];
     dst->s[j] = 0;
     dst->l = j;
+    return 0;
 }
 
 int main(int argc, char *argv[])
@@ -70,6 +75,7 @@ int main(int argc, char *argv[])
     kstream_t *ks;
     kstring_t s, t[N_TMPSTR];
     int dret, i, k, af_n, af_max, af_i, c, is_padded = 0, write_cns = 0, *p2u = 0;
+    int r, nomem = 0;
     long m_cigar = 0, n_cigar = 0;
     unsigned *af, *cigar = 0;
 
@@ -96,17 +102,27 @@ int main(int argc, char *argv[])
     fp = strcmp(argv[optind], "-")? gzopen(argv[optind], "r") : gzdopen(fileno(stdin), "r");
     if (fp == NULL) fatal("can't open input file");
     ks = ks_init(fp);
-    while (ks_getuntil(ks, 0, &s, &dret) >= 0) {
+    while ((r = ks_getuntil(ks, 0, &s, &dret)) >= 0) {
         if (strcmp(s.s, "CO") == 0) { // contig sequence
             kstring_t *cns;
             t[0].l = t[1].l = t[2].l = t[3].l = t[4].l = 0; // 0: name; 1: padded ctg; 2: unpadded ctg/padded read; 3: unpadded read; 4: SAM line
             af_n = af_i = 0; // reset the af array
-            ks_getuntil(ks, 0, &s, &dret); kputs(s.s, &t[0]); // contig name
-            ks_getuntil(ks, '\n', &s, &dret); // read the whole line
-            while (ks_getuntil(ks, '\n', &s, &dret) >= 0 && s.l > 0) kputsn(s.s, s.l, &t[1]); // read the padded consensus sequence
-            remove_pads(&t[1], &t[2]); // construct the unpadded sequence
+            if ((r = ks_getuntil(ks, 0, &s, &dret)) < 0) // contig name
+                break;
+            kputs_chk(&nomem, s.s, &t[0]);
+            if ((r = ks_getuntil(ks, '\n', &s, &dret)) < 0) // read the whole line
+                break;
+            while ((r = ks_getuntil(ks, '\n', &s, &dret)) >= 0 && s.l > 0)
+                kputsn_chk(&nomem, s.s, s.l, &t[1]); // read the padded consensus sequence
+            if (r < 0 || nomem)
+                break;
+            if (remove_pads(&t[1], &t[2]) < 0) // construct the unpadded sequence
+                fatal("Out of memory");
             // compute the array for mapping padded positions to unpadded positions
             p2u = realloc(p2u, t[1].m * sizeof(int));
+            if (!p2u)
+                fatal("Out of memory");
+
             for (i = k = 0; i < t[1].l; ++i) {
                 p2u[i] = k;
                 if (t[1].s[i] != '*') ++k;
@@ -141,27 +157,50 @@ int main(int argc, char *argv[])
                 n_cigar = 0;
                 if (is_padded) __padded2cigar(t[1]);
                 else write_cigar(cigar, n_cigar, m_cigar, t[2].l<<4);
-                kputsn(t[0].s, t[0].l, &t[4]); kputs("\t516\t", &t[4]); kputsn(t[0].s, t[0].l, &t[4]); kputs("\t1\t60\t", &t[4]);
+                kputsn_chk(&nomem, t[0].s, t[0].l, &t[4]);
+                kputs_chk(&nomem, "\t516\t", &t[4]);
+                kputsn_chk(&nomem, t[0].s, t[0].l, &t[4]);
+                kputs_chk(&nomem, "\t1\t60\t", &t[4]);
                 for (i = 0; i < n_cigar; ++i) {
-                    kputw(cigar[i]>>4, &t[4]); kputc("MIDNSHP=X"[cigar[i]&0xf], &t[4]);
+                    kputw_chk(&nomem, cigar[i]>>4, &t[4]);
+                    kputc_chk(&nomem, "MIDNSHP=X"[cigar[i]&0xf], &t[4]);
                 }
-                kputs("\t*\t0\t0\t", &t[4]); kputsn(t[2].s, t[2].l, &t[4]); kputs("\t*", &t[4]);
+                kputs_chk(&nomem, "\t*\t0\t0\t", &t[4]);
+                kputsn_chk(&nomem, t[2].s, t[2].l, &t[4]);
+                kputs_chk(&nomem, "\t*", &t[4]);
+                if (nomem)
+                    fatal("Out of memory");
             }
         } else if (strcmp(s.s, "BQ") == 0) { // contig quality
             if (t[0].l == 0) fatal("come to 'BQ' before reading 'CO'");
-            if (dret != '\n') ks_getuntil(ks, '\n', &s, &dret); // read the entire "BQ" line
+            if (dret != '\n') {
+                r = ks_getuntil(ks, '\n', &s, &dret); // read the entire "BQ" line
+                if (r < 0)
+                    break;
+            }
             if (write_cns) t[4].s[--t[4].l] = 0; // remove the trailing "*"
             for (i = 0; i < t[2].l; ++i) { // read the consensus quality
                 int q;
-                if (ks_getuntil(ks, 0, &s, &dret) < 0) fprintf(stderr, "E truncated contig quality\n");
+                if ((r = ks_getuntil(ks, 0, &s, &dret)) < 0) {
+                    fprintf(stderr, "E truncated contig quality\n");
+                    break;
+                }
                 if (s.l) {
                     q = atoi(s.s) + 33;
                     if (q > 126) q = 126;
-                    if (write_cns) kputc(q, &t[4]);
+                    if (write_cns) kputc_chk(&nomem, q, &t[4]);
                 } else --i;
             }
-            if (dret != '\n') ks_getuntil(ks, '\n', &s, &dret);
-            ks_getuntil(ks, '\n', &s, &dret); // skip the empty line
+            if (dret != '\n') {
+                if ((r = ks_getuntil(ks, '\n', &s, &dret)) < 0)
+                    break;
+            }
+            if ((r = ks_getuntil(ks, '\n', &s, &dret)) < 0) // skip the empty line
+                break;
+
+            if (nomem)
+                break;
+
             if (write_cns) {
                 if (t[4].l) puts(t[4].s);
                 t[4].l = 0;
@@ -173,9 +212,14 @@ int main(int argc, char *argv[])
                 if (t[4].l) puts(t[4].s);
                 t[4].l = 0;
             }
-            ks_getuntil(ks, 0, &s, &dret); // read name
-            ks_getuntil(ks, 0, &s, &dret); reversed = s.s[0] == 'C'? 1 : 0; // strand
-            ks_getuntil(ks, 0, &s, &dret); pos = atoi(s.s); neg = pos < 0? 1 : 0; pos = pos < 0? -pos : pos; // position
+            if ((r = ks_getuntil(ks, 0, &s, &dret)) < 0) // read name
+                break;
+            if ((r = ks_getuntil(ks, 0, &s, &dret)) < 0)
+                break;
+            reversed = s.s[0] == 'C'? 1 : 0; // strand
+            if ((r = ks_getuntil(ks, 0, &s, &dret)) < 0)
+                break;
+            pos = atoi(s.s); neg = pos < 0? 1 : 0; pos = pos < 0? -pos : pos; // position
             if (af_n == af_max) { // double the af array
                 af_max = af_max? af_max<<1 : 4;
                 af = realloc(af, af_max * sizeof(unsigned));
@@ -184,22 +228,35 @@ int main(int argc, char *argv[])
         } else if (strcmp(s.s, "RD") == 0) { // read sequence
             if (af_i >= af_n) fatal("more 'RD' records than 'AF'");
             t[2].l = t[3].l = t[4].l = 0;
-            ks_getuntil(ks, 0, &t[4], &dret); // QNAME
-            if (dret != '\n') ks_getuntil(ks, '\n', &s, &dret); // read the entire RD line
-            while (ks_getuntil(ks, '\n', &s, &dret) >= 0 && s.l > 0) kputs(s.s, &t[2]); // read the read sequence
+            if ((r = ks_getuntil(ks, 0, &t[4], &dret)) < 0) // QNAME
+                break;
+            if (dret != '\n') {
+                if ((r = ks_getuntil(ks, '\n', &s, &dret)) < 0) // read the entire RD line
+                    break;
+            }
+            while ((r = ks_getuntil(ks, '\n', &s, &dret)) >= 0 && s.l > 0)
+                kputs_chk(&nomem, s.s, &t[2]); // read the read sequence
+            if (r < 0 || nomem)
+                break;
         } else if (strcmp(s.s, "QA") == 0) { // clipping
             if (af_i >= af_n) fatal("more 'QA' records than 'AF'");
             int beg, end, pos, op;
-            ks_getuntil(ks, 0, &s, &dret); ks_getuntil(ks, 0, &s, &dret); // skip quality clipping
-            ks_getuntil(ks, 0, &s, &dret); beg = atoi(s.s) - 1; // align clipping start
-            ks_getuntil(ks, 0, &s, &dret); end = atoi(s.s); // clipping end
-            if (dret != '\n') ks_getuntil(ks, '\n', &s, &dret);
+            if ((r = ks_getuntil(ks, 0, &s, &dret)) < 0) break;
+            if ((r = ks_getuntil(ks, 0, &s, &dret)) < 0) break; // skip quality clipping
+            if ((r = ks_getuntil(ks, 0, &s, &dret)) < 0) break;
+            beg = atoi(s.s) - 1; // align clipping start
+            if ((r = ks_getuntil(ks, 0, &s, &dret)) < 0) break;
+            end = atoi(s.s); // clipping end
+            if (dret != '\n') {
+                if ((r = ks_getuntil(ks, '\n', &s, &dret)) < 0) break;
+            }
             // compute 1-based POS
             pos = af[af_i]>>2; // retrieve the position information
             if (af[af_i]>>1&1) pos = -pos;
             pos += beg; // now pos is the true padded position
             // generate CIGAR
-            remove_pads(&t[2], &t[3]); // backup the unpadded read sequence
+            if (remove_pads(&t[2], &t[3]) < 0) // backup the unpadded read sequence
+                fatal("Out of memory");
             n_cigar = 0;
             if (beg) write_cigar(cigar, n_cigar, m_cigar, beg<<4|4);
             if (is_padded) {
@@ -232,20 +289,30 @@ int main(int argc, char *argv[])
             }
             if (end < t[2].l) write_cigar(cigar, n_cigar, m_cigar, (t[2].l - end)<<4|4);
             // write the SAM line for the read
-            kputc('\t', &t[4]); // QNAME has already been written
-            kputw((af[af_i]&1)? 16 : 0, &t[4]); kputc('\t', &t[4]); // FLAG
-            kputsn(t[0].s, t[0].l, &t[4]); kputc('\t', &t[4]); // RNAME
-            kputw(is_padded? pos : p2u[pos-1]+1, &t[4]); // POS
-            kputs("\t60\t", &t[4]); // MAPQ
+            kputc_chk(&nomem, '\t', &t[4]); // QNAME has already been written
+            kputw_chk(&nomem, (af[af_i]&1) ? 16 : 0, &t[4]); // FLAG
+            kputc_chk(&nomem, '\t', &t[4]);
+            kputsn_chk(&nomem, t[0].s, t[0].l, &t[4]); // RNAME
+            kputc_chk(&nomem, '\t', &t[4]);
+            kputw_chk(&nomem, is_padded? pos : p2u[pos-1]+1, &t[4]); // POS
+            kputs_chk(&nomem, "\t60\t", &t[4]); // MAPQ
             for (i = 0; i < n_cigar; ++i) { // CIGAR
-                kputw(cigar[i]>>4, &t[4]); kputc("MIDNSHP=X"[cigar[i]&0xf], &t[4]);
+                kputw_chk(&nomem, cigar[i]>>4, &t[4]);
+                kputc_chk(&nomem, "MIDNSHP=X"[cigar[i]&0xf], &t[4]);
             }
-            kputs("\t*\t0\t0\t", &t[4]); // empty MRNM, MPOS and TLEN
-            kputsn(t[3].s, t[3].l, &t[4]); // unpadded SEQ
-            kputs("\t*", &t[4]); // QUAL
+            kputs_chk(&nomem, "\t*\t0\t0\t", &t[4]); // empty MRNM, MPOS and TLEN
+            kputsn_chk(&nomem, t[3].s, t[3].l, &t[4]); // unpadded SEQ
+            kputs_chk(&nomem, "\t*", &t[4]); // QUAL
+            if (nomem)
+                break;
             puts(t[4].s); // print to stdout
             ++af_i;
-        } else if (dret != '\n') ks_getuntil(ks, '\n', &s, &dret);
+        } else if (dret != '\n') {
+            if ((r = ks_getuntil(ks, '\n', &s, &dret) < 0)) break;
+        }
+    }
+    if (r < -1 || nomem) {
+        fatal(nomem ? "Out of memory" : "Error reading input file");
     }
     ks_destroy(ks);
     gzclose(fp);
