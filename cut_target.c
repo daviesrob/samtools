@@ -89,7 +89,8 @@ static int gencns(uint16_t *cns_out, ct_t *g, int n, const bam_pileup1_t *plp)
         *cns_out = 0;
         return 0;
     }
-    errmod_cal(g->em, k, 4, g->bases, q);
+    if (errmod_cal(g->em, k, 4, g->bases, q) < 0)
+        return -1;
     for (i = 0; i < 4; ++i) sum[i] = (int)(q[i<<2|i] + .499) << 2 | i;
     for (i = 1; i < 4; ++i) // insertion sort
         for (j = i; j > 0 && sum[j] < sum[j-1]; --j)
@@ -170,7 +171,8 @@ static int read_aln(void *data, bam1_t *b)
                 g->ref = fai_fetch64(g->fai, sam_hdr_tid2name(g->h, b->core.tid), &g->len);
                 g->tid = b->core.tid;
             }
-            sam_prob_realn(b, g->ref, g->len, 1<<1|1);
+            if (sam_prob_realn(b, g->ref, g->len, 1<<1|1) < -3)
+                return -2;
         }
         break;
     }

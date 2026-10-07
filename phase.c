@@ -425,7 +425,10 @@ static int dump_aln(phaseg_t *g, int min_pos, const nseq_t *hash)
             else { // phased and not flipped
                 char c = 'Y';
                 which = f->phase;
-                bam_aux_append(b, "ZP", 'A', 1, (uint8_t*)&c);
+                if (bam_aux_append(b, "ZP", 'A', 1, (uint8_t*)&c) < 0) {
+                    print_error_errno("phase", "couldn't add ZP tag");
+                    return -1;
+                }
             }
             if (which < 2 && is_flip) which = 1 - which; // increase the randomness
         }
@@ -867,7 +870,8 @@ int main_phase(int argc, char *argv[])
             bases[k++] = q<<5 | (int)bam_is_rev(p->b)<<4 | b;
         }
         if (k == 0) continue;
-        errmod_cal(em, k, 4, bases, q); // compute genotype likelihood
+        if (errmod_cal(em, k, 4, bases, q) < 0) // compute genotype likelihood
+            goto out;
         c = gl2cns(q); // get the consensus
         // tell if to proceed
         if (set && (g.flag&FLAG_LIST_EXCL) && !in_set) continue; // not in the list
